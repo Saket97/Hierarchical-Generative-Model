@@ -12,19 +12,25 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 25 #k
-batch_size = 100
-eps_dim = 10
+latent_dim = 4000 #k
+batch_size = 10
+eps_dim = 100
 enc_net_hidden_dim = 256
-n_samples = 100
-n_epoch = 1
-filename = "M255.pkl"
+n_samples = batch_size
+n_epoch = 100
+# filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
-    with open(filename, "rb") as pkl_file:
-        a = pkl.load(pkl_file)
-    a = np.array(a)
-    return a
+    raw_data=np.load('/opt/data/saket/gene_data/data/total_data.npy')
+    raw_label=np.load('/opt/data/saket/gene_data/data_label.npy')
+    cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
+    global inp_data_dim
+    inp_data_dim = np.shape(raw_data)[1]
+    global inp_cov_dim
+    inp_cov_dim = np.shape(cov)[1]
+    assert(np.shape(raw_data)[0] == np.shape(cov)[0])
+    return raw_data[0:160,:], cov[0:160,:]
+
 X_dataset, C_dataset = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 
@@ -39,7 +45,7 @@ def decoder_network(z1, z2, c):
     Arguments:
         z1: components of the latent features z which is given as input at layer 1
         z2: components of the latent features z which is given as input as layer 2
-        c: covariates matrix
+        c: covariates msatrix
 
     Return:
         y1, y2: output of the layer 1 and 2
@@ -149,6 +155,7 @@ tr_loss = []
 recon_loss = []
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver()
     for epoch in range(n_epoch):
         XC_dataset = np.random.shuffle(XC_dataset)
         X_dataset = XC_dataset[:,0:inp_data_dim]
@@ -166,6 +173,7 @@ with tf.Session() as sess:
             s_loss.append(si_loss)
             tr_loss.append(t_loss)
             recon_loss.append(r_loss)
+        save_path = saver.save(sess, "/opt/data/HGM/model.ckpt")
         print ("epoch:%d si_loss:%f t_loss:%f reconstruction_loss:%f"%(epoch, s_loss[-1], tr_loss[-1], recon_loss[-1]))
 
 with open("s_loss.pkl", "wb") as pkl_file:

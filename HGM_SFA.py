@@ -15,8 +15,8 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 4000 #k
-batch_size = 10 
+latent_dim = 300 #k
+batch_size = 20 
 eps_dim = 4
 enc_net_hidden_dim = 128
 n_samples = batch_size
@@ -24,7 +24,7 @@ n_epoch = 100
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
-    raw_data=np.load('/opt/data/saket/gene_data/data/total_data.npy')
+    raw_data=np.load('/opt/data/saket/gene_data/data/data_3k.npy')
     #raw_label=np.load('/opt/data/saket/gene_data/data_label.npy')
     cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
     raw_data=raw_data[:,0:4000:2]
@@ -79,7 +79,7 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps_dim, reuse):
         z2 = slim.fully_connected(h, z2_dim)
     return z1, z2
 
-def data_network(x, z, n_layer=2, n_hidden=128, reuse=False):
+def data_network(x, z, n_layer=3, n_hidden=128, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
     Arguments:
         x: Data matrix of dimension (batch_size, inp_data_dim)
@@ -149,6 +149,8 @@ evars = [var for var in t_vars if var.name.startswith("encoder")]
 dvars = [var for var in t_vars if var.name.startswith("decoder")]
 lvars = [var for var in t_vars if var.name.startswith("loss")]
 
+print("svars+dnvars",svars+dnvars)
+print("e+d+l", evars+dvars+lvars)
 opt = tf.train.AdamOptimizer(1e-3, beta1=0.5)
 train_si = opt.minimize(-si_net_maximise, var_list=svars+dnvars)
 reg_variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)

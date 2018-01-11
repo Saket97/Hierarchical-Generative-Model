@@ -135,7 +135,8 @@ def data_network(x, z, n_layer=3, n_hidden=256, reuse=False):
 def cal_loss(x, z, x_sample, z_sample):
     with tf.variable_scope("Loss"):
         g_x_z = data_network(x, z)
-        g_x_z_s = graph_replace(g_x_z, {x:x_sample, z:z_sample})
+        # g_x_z_s = graph_replace(g_x_z, {x:x_sample, z:z_sample})
+        g_x_z_s = data_network(x_sample, z_sample, reuse=True)
         with tf.name_scope("Si_maximise"):
             f1 = g_x_z - tf.nn.softplus(g_x_z)
             f2 = -tf.nn.softplus(g_x_z_s)
@@ -167,6 +168,7 @@ def train(si, tp, x, c, recon_loss):
     s_loss = []
     tp_loss = []
     re_loss = []
+    acc = []
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver()
@@ -209,7 +211,10 @@ def train(si, tp, x, c, recon_loss):
                 print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
             save_path = saver.save(sess, "gene_data/model.ckpt")
-            print ("######################## epoch:%d si_loss:%f t_loss:%f"%(epoch, s_loss[-1], tp_loss[-1]))
+            accuracy = sess.run(recon_loss, feed_dict={x:X_t, c:C_t})
+            acc.append(accuracy)
+            print ("######################## epoch:%d si_loss:%f t_loss:%f accuracy:%f"%(epoch, s_loss[-1], tp_loss[-1], accuracy))
+
     train_writer.close()
     with open("gene_data/data/s_loss.pkl", "wb") as pkl_file:
         pkl.dump(s_loss, pkl_file)
@@ -217,12 +222,14 @@ def train(si, tp, x, c, recon_loss):
         pkl.dump(tp_loss, pkl_file)
     with open("gene_data/data/re_loss.pkl", "wb") as pkl_file:
         pkl.dump(re_loss, pkl_file)
+    with open("gene_data/data/acc.pkl", "wb") as pkl_file:
+        pkl.dump(acc, pkl_file)
 
 def main():
     tf.reset_default_graph()
 
-    x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
-    c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
+    c = tf.placeholder(tf.float32, shape=(None, inp_cov_dim))
+    x = tf.placeholder(tf.float32, shape=(None, inp_data_dim))
 
     z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps_dim, False)
     y1, y2 = decoder_network(z1, z2, c, False)
@@ -232,9 +239,10 @@ def main():
     z_sample = MVN.sample(n_samples)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
-    x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
+    # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
+    x_sample = decoder_network(z1_sample, z2_sample, c, True)
 
-    si, tp = cal_loss(x, z, x_sample, z_sample)
+    si, tp = cal_loss(x, z, x_sample, z_samples, test_accuracy)
     recon_loss = tf.nn.l2_loss(y1-x)
     train(si, tp, x, c,recon_loss)
 

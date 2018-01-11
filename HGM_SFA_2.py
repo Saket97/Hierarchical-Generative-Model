@@ -29,18 +29,18 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
 latent_dim = 300 #k
-batch_size = 10 
-eps_dim = 4
-enc_net_hidden_dim = 128
+batch_size = 160 
+eps_dim = 10
+enc_net_hidden_dim = 256
 n_samples = batch_size
-n_epoch = 10
+n_epoch = 10000
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
-    # raw_data=np.load('/opt/data/saket/gene_data/data/data_3k.npy')
-    raw_data=np.load('gene_data/data/data_3k.npy')
-    # cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
-    cov = np.load('gene_data/data/cov1.npy')
+    raw_data=np.load('/opt/data/saket/gene_data/data/data_3k.npy')
+    #raw_data=np.load('gene_data/data/data_3k.npy')
+    cov = np.load('/opt/data/saket/gene_data/data/cov1.npy')
+    #cov = np.load('gene_data/data/cov1.npy')
     global inp_data_dim
     inp_data_dim = np.shape(raw_data)[1]
     global inp_cov_dim
@@ -50,9 +50,9 @@ def load_dataset():
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
-    return raw_data[0:160], cov[0:160,:]
+    return raw_data[0:160], cov[0:160,:], raw_data[160:], cov[160:]
 
-X_dataset, C_dataset = load_dataset()
+X_dataset, C_dataset, X_t, C_t = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 print("Dataset Loaded... X:", np.shape(X_dataset), " C:", np.shape(C_dataset))
 
@@ -151,13 +151,13 @@ def cal_loss(x, z, x_sample, z_sample):
             # tp = f1
     return si, tp
 
-def train(si, tp, x, c):
+def train(si, tp, x, c, recon_loss):
 
     t_vars = tf.trainable_variables()
     evars = [var for var in t_vars if var.name.startswith("encoder")]
     dvars = [var for var in t_vars if var.name.startswith("decoder")]
     lvars = [var for var in t_vars if var.name.startswith("Loss")]
-    r_loss = tf.losses.get_total_loss()    
+    r_loss = tf.losses.get_total_loss() 
     opt = tf.train.AdamOptimizer(1e-4)
     train_si = opt.minimize(-si+r_loss, var_list=lvars)
     train_t_p = opt.minimize(tp+r_loss, var_list=evars+dvars)
@@ -166,6 +166,7 @@ def train(si, tp, x, c):
     train_writer = tf.summary.FileWriter(FLAGS.logdir, graph = tf.get_default_graph())
     s_loss = []
     tp_loss = []
+    re_loss = []
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver()
@@ -181,32 +182,41 @@ def train(si, tp, x, c):
                 run_metadata = tf.RunMetadata()
                 for _ in range(1):
                     # try:
-                    summary, si_loss, _ = sess.run([merged, si, train_si], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                    if epoch % 100 == 0 and i == 0:
+                        summary, si_loss, _ = sess.run([merged, si, train_si], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        train_writer.add_run_metadata(run_metadata, 'step%03depoch%d' % (i, epoch))
+                        train_writer.add_summary(summary, i)
+                    else:                    
+                        si_loss, _ = sess.run([si, train_si], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
                     s_loss.append(si_loss)
                     # except:
                         # train_writer.close()
                 
                 for _ in range(1):
-                    try:
+                    #try:
+                    if epoch % 100 == 0 and i == 0:
                         summary, t_loss, _ = sess.run([merged, tp, train_t_p], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
-                        tp_loss.append(t_loss)
-                    except:
-                        train_writer.close()
+                        train_writer.add_run_metadata(run_metadata, 'step%03depochSecond%d' % (i, epoch))
+                        train_writer.add_summary(summary, i)
+                    else:
+                        t_loss, _ = sess.run([tp, train_t_p], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                    tp_loss.append(t_loss)
+                    #except:
+                rec_loss = sess.run(recon_loss, feed_dict={x:xmb,c:cmb})
+                re_loss.append(rec_loss)                
+                #train_writer.close()
 
-                try:
-                    train_writer.add_run_metadata(run_metadata, 'step%03d' % i)
-                    train_writer.add_summary(summary, i)
-                except:
-                    train_writer.close()
-                print ("sTEP:%d si_loss:%f t_loss:%f"%(i, s_loss[-1], tp_loss[-1]))
+                print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
             save_path = saver.save(sess, "gene_data/model.ckpt")
             print ("######################## epoch:%d si_loss:%f t_loss:%f"%(epoch, s_loss[-1], tp_loss[-1]))
-
+    train_writer.close()
     with open("gene_data/data/s_loss.pkl", "wb") as pkl_file:
         pkl.dump(s_loss, pkl_file)
     with open("gene_data/data/tp_loss.pkl", "wb") as pkl_file:
         pkl.dump(tp_loss, pkl_file)
+    with open("gene_data/data/re_loss.pkl", "wb") as pkl_file:
+        pkl.dump(re_loss, pkl_file)
 
 def main():
     tf.reset_default_graph()
@@ -225,6 +235,7 @@ def main():
     x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
 
     si, tp = cal_loss(x, z, x_sample, z_sample)
-    train(si, tp, x, c)
+    recon_loss = tf.nn.l2_loss(y1-x)
+    train(si, tp, x, c,recon_loss)
 
 main()

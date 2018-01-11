@@ -16,7 +16,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
 latent_dim = 300 #k
-batch_size = 20 
+batch_size = 80 
 eps_dim = 4
 enc_net_hidden_dim = 128
 n_samples = batch_size
@@ -27,7 +27,6 @@ def load_dataset():
     raw_data=np.load('/opt/data/saket/gene_data/data/data_3k.npy')
     #raw_label=np.load('/opt/data/saket/gene_data/data_label.npy')
     cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
-    raw_data=raw_data[:,0:4000:2]
     global inp_data_dim
     inp_data_dim = np.shape(raw_data)[1]
     global inp_cov_dim
@@ -56,9 +55,9 @@ def decoder_network(z1, z2, c, reuse):
     """
     assert(z1.get_shape().as_list()[0] == z2.get_shape().as_list()[0])
     with tf.variable_scope("decoder", reuse = reuse):
-        A = tf.get_variable("A", shape=(inp_data_dim, latent_dim), regularizer=slim.l1_regularizer(scale=0.1))
-        B = tf.get_variable("B", shape=(inp_data_dim, inp_cov_dim), regularizer=slim.l1_regularizer(scale=0.1))
-        DELTA = tf.get_variable("DELTA", shape=(inp_data_dim)) # It is a diagonal matrix
+        A = tf.get_variable("A", shape=(inp_data_dim, latent_dim), initializer=tf.truncated_normal_initializer,regularizer=slim.l1_regularizer(scale=0.1))
+        B = tf.get_variable("B", shape=(inp_data_dim, inp_cov_dim), initializer=tf.truncated_normal_initializer,regularizer=slim.l1_regularizer(scale=0.1))
+        DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
         DELTA = tf.diag(DELTA)
         
         y2 = tf.matmul(z2, A, transpose_b=True) + tf.matmul(c, B, transpose_b=True)
@@ -79,7 +78,7 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps_dim, reuse):
         z2 = slim.fully_connected(h, z2_dim)
     return z1, z2
 
-def data_network(x, z, n_layer=3, n_hidden=128, reuse=False):
+def data_network(x, z, n_layer=3, n_hidden=256, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
     Arguments:
         x: Data matrix of dimension (batch_size, inp_data_dim)
@@ -91,11 +90,16 @@ def data_network(x, z, n_layer=3, n_hidden=128, reuse=False):
         h = tf.concat([x,z], axis=1)
         h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden)
         h = slim.fully_connected(h, 1)
+        h = tf.Print(h,[h],message="h data_network")
     return h
 
 def cal_maximising_quantity(z_sample, x_sample, z, x, reuse):
     """ Expression which needs to be maximised for Si """
     #with tf.variable_scope("Si", reuse=reuse):
+    x_sample = tf.Print(x_sample, [x_sample], message="x_sample cal_mq")
+    z_sample = tf.Print(z_sample, [z_sample], message="z_sample cal_mq")
+    x = tf.Print(x, [x], message="x cal_mq")
+    z = tf.Print(z, [z], message="z cal_mq")
     g_si = data_network(x_sample, z_sample, reuse=False)
     g_si_sig = tf.nn.sigmoid(g_si)
     f = tf.log(1-g_si_sig)
@@ -112,11 +116,17 @@ def cal_maximising_quantity(z_sample, x_sample, z, x, reuse):
 
 def cal_loss(x_sample, z_sample, x, z, reuse):
     #with tf.variable_scope("loss", reuse=reuse):
+    x_sample = tf.Print(x_sample, [x_sample], message="x_sample cal_loss")
+    z_sample = tf.Print(z_sample, [z_sample], message="z_sample cal_loss")
+    x = tf.Print(x, [x], message="x cal_loss")
+    z = tf.Print(z, [z], message="z cal_loss")
     w_x_z = data_network(x,z, reuse=True)
     f1 = tf.truediv(tf.reduce_sum(w_x_z), w_x_z.get_shape().as_list()[0]*1.0)
+    f1 = tf.Print(f1,[w_x_z,f1], message="f1 loss")
 
     w_x_z = data_network(x_sample, z_sample, reuse=True)
     f2 = tf.truediv(tf.reduce_sum(w_x_z), w_x_z.get_shape().as_list()[0]*1.0)
+    f2 = tf.Print(f2,[w_x_z,f1], message="f2 loss")
 
     final = f1-f2
     return final
@@ -151,7 +161,7 @@ lvars = [var for var in t_vars if var.name.startswith("loss")]
 
 print("svars+dnvars",svars+dnvars)
 print("e+d+l", evars+dvars+lvars)
-opt = tf.train.AdamOptimizer(1e-3, beta1=0.5)
+opt = tf.train.AdamOptimizer(1e-4)
 train_si = opt.minimize(-si_net_maximise, var_list=svars+dnvars)
 reg_variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 train_t_p = opt.minimize(theta_phi_minimise + sum(reg_variables), var_list=evars+dvars+lvars)

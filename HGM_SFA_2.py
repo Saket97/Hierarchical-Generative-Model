@@ -28,12 +28,13 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 300 #k
+latent_dim = 400 #k
 batch_size = 160 
-eps_dim = 10
+test_batch_size = 52
+eps_dim = 100
 enc_net_hidden_dim = 256
 n_samples = batch_size
-n_epoch = 10000
+n_epoch = 8000
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
@@ -73,18 +74,16 @@ def standard_normal(shape, **kwargs):
     return tf.cast(st.StochasticTensor(
         ds.MultivariateNormalDiag(tf.zeros(shape), tf.ones(shape), **kwargs)),  tf.float32)
 
-def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps_dim, reuse):
+def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse):
     with tf.variable_scope("encoder", reuse = reuse):
-        eps2 = standard_normal([batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
-        eps1 = standard_normal([batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
 
         h = tf.concat([x, c, eps1], 1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
-        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
 
         h = tf.concat([x, c, z1, eps2], axis=1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
-        z2 = slim.fully_connected(h, z2_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        z2 = slim.fully_connected(h, z2_dim, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
 
         variable_summaries(z1)
         variable_summaries(z2)
@@ -103,7 +102,7 @@ def decoder_network(z1, z2, c, reuse):
     assert(z1.get_shape().as_list()[0] == z2.get_shape().as_list()[0])
     with tf.variable_scope("decoder", reuse = reuse):
         inp = tf.concat([z2,c], axis=1)
-        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.truncated_normal_initializer, kernel_regularizer=slim.l1_regularizer(0.5))
+        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=slim.xavier_initializer(), kernel_regularizer=slim.l1_regularizer(0.5))
         DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
         y1 = y2+DELTA*z1
         
@@ -124,11 +123,11 @@ def data_network(x, z, n_layer=3, n_hidden=256, reuse=False):
     with tf.variable_scope("data_network", reuse = reuse):
         h = tf.concat([x,z], axis=1)
         variable_summaries(h)
-        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5))
         variable_summaries(h)
-        h = slim.fully_connected(h, 1, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.fully_connected(h, 1, activation_fn=tf.nn.relu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5))
         variable_summaries(h)
-        # h = tf.Print(h,[h],message="h data_network")
+        h = tf.Print(h,[h],message="h data_network")
         # variable_summaries(h)
     return h
 
@@ -152,7 +151,7 @@ def cal_loss(x, z, x_sample, z_sample):
             # tp = f1
     return si, tp
 
-def train(si, tp, x, c, recon_loss):
+def train(si, tp, x, c, recon_loss, test_accuracy):
 
     t_vars = tf.trainable_variables()
     evars = [var for var in t_vars if var.name.startswith("encoder")]
@@ -210,19 +209,19 @@ def train(si, tp, x, c, recon_loss):
 
                 print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
-            save_path = saver.save(sess, "gene_data/model.ckpt")
-            accuracy = sess.run(recon_loss, feed_dict={x:X_t, c:C_t})
+            save_path = saver.save(sess, "/opt/data/saket/model.ckpt")
+            accuracy = sess.run(test_accuracy)
             acc.append(accuracy)
             print ("######################## epoch:%d si_loss:%f t_loss:%f accuracy:%f"%(epoch, s_loss[-1], tp_loss[-1], accuracy))
 
     train_writer.close()
-    with open("gene_data/data/s_loss.pkl", "wb") as pkl_file:
+    with open("gene_data/data/s_loss_relu_xavier_1500.pkl", "wb") as pkl_file:
         pkl.dump(s_loss, pkl_file)
-    with open("gene_data/data/tp_loss.pkl", "wb") as pkl_file:
+    with open("gene_data/data/tp_loss_relu_xavier_1500.pkl", "wb") as pkl_file:
         pkl.dump(tp_loss, pkl_file)
-    with open("gene_data/data/re_loss.pkl", "wb") as pkl_file:
+    with open("gene_data/data/re_loss_relu_xavier_1500.pkl", "wb") as pkl_file:
         pkl.dump(re_loss, pkl_file)
-    with open("gene_data/data/acc.pkl", "wb") as pkl_file:
+    with open("gene_data/data/acc_relu.pkl_xavier_1500", "wb") as pkl_file:
         pkl.dump(acc, pkl_file)
 
 def main():
@@ -231,7 +230,9 @@ def main():
     c = tf.placeholder(tf.float32, shape=(None, inp_cov_dim))
     x = tf.placeholder(tf.float32, shape=(None, inp_data_dim))
 
-    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps_dim, False)
+    eps2 = standard_normal([batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
+    eps1 = standard_normal([batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
+    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False)
     y1, y2 = decoder_network(z1, z2, c, False)
     z = tf.concat([z1,z2], axis=1)
     
@@ -240,10 +241,16 @@ def main():
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
-    x_sample = decoder_network(z1_sample, z2_sample, c, True)
+    x_sample, _ = decoder_network(z1_sample, z2_sample, c, True)
 
-    si, tp = cal_loss(x, z, x_sample, z_samples, test_accuracy)
+    eps2 = standard_normal([test_batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
+    eps1 = standard_normal([test_batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
+    z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+    y1_t, y2_t = decoder_network(z1_t, z2_t, C_t, True)
+    test_accuracy = tf.nn.l2_loss(y1_t-X_t)
+
+    si, tp = cal_loss(x, z, x_sample, z_sample)
     recon_loss = tf.nn.l2_loss(y1-x)
-    train(si, tp, x, c,recon_loss)
+    train(si, tp, x, c,recon_loss, test_accuracy)
 
 main()

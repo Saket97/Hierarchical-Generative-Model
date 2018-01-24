@@ -29,14 +29,14 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 200 #k
+latent_dim = 100 #k
 batch_size = 160 
 test_batch_size = 52
 eps_dim = 100
 enc_net_hidden_dim = 256
 n_samples = batch_size
-n_epoch = 3000
-cyc = 0.1
+n_epoch = 500
+cyc = 5
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
@@ -114,9 +114,9 @@ def decoder_network(z1, z2, c, reuse):
         DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
         y1 = y2+DELTA*z1
         
-        A = tf.slice(weights, [0,0],[200,-1])
+        A = tf.slice(weights, [0,0],[latent_dim,-1])
         A = tf.transpose(A)
-        B = tf.slice(weights, [200, 0], [-1,-1])
+        B = tf.slice(weights, [latent_dim, 0], [-1,-1])
         B = tf.transpose(B)
         variable_summaries(DELTA, name="DELTA")
         variable_summaries(y1, name="y1")
@@ -220,7 +220,7 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         saver = tf.train.Saver(save_relative_paths=True)
         for epoch in range(n_epoch):
-            np.random.shuffle(XC_dataset)
+            #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
 
@@ -251,7 +251,8 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
                         train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+5+j))
                         train_writer.add_summary(summary, epoch*6+5+j)
                     else:
-                        t_loss, _ , _ , _ = sess.run([tp, train_t_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
                     t_loss_list.append(t_loss)
                     p_loss_list.append(p_loss)
                     #except:
@@ -274,26 +275,26 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
             print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f accuracy:%f"%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1], accuracy))
 
         train_writer.close()
-        np.save("/opt/data/saket/gene_data/data/y1_elu_200_100_5.npy", y1_)
-        np.save("/opt/data/saket/gene_data/data/A_elu_200_100_5.npy", A_)
-        np.save("/opt/data/saket/gene_data/data/B_elu_200_100_5.npy", B_)
-    with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+        np.save("/opt/data/saket/gene_data/data/y1_elu_100_100_5.npy", y1_)
+        np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
+        np.save("/opt/data/saket/gene_data/data/B_elu_100_100_5.npy", B_)
+    with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(s_loss, pkl_file)
-    with open("/opt/data/saket/gene_data/data/t_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/t_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(t_loss_list, pkl_file)
-    with open("/opt/data/saket/gene_data/data/p_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/p_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(p_loss_list, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/re_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(re_loss, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/acc_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(acc, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_abs_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/acc_abs_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(acc_abs, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_std_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/acc_std_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(acc_std, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_abs_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/re_abs_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(re_abs, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_std_loss_elu_xavier_200_100_5.pkl", "wb") as pkl_file:
+    with open("/opt/data/saket/gene_data/data/re_std_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(re_std, pkl_file)
 
 def main():
@@ -314,8 +315,8 @@ def main():
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
     x_sample, _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True)
-    z_x_sample_encoded = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
-
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+    z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
 
     eps2 = standard_normal([test_batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
     eps1 = standard_normal([test_batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)

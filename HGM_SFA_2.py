@@ -29,11 +29,11 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 100 #k
+latent_dim = 80 #k
 batch_size = 160 
 test_batch_size = 52
-eps_dim = 100
-enc_net_hidden_dim = 256
+eps_dim = 40
+enc_net_hidden_dim = 128
 n_samples = batch_size
 n_epoch = 500
 cyc = 5
@@ -124,7 +124,7 @@ def decoder_network(z1, z2, c, reuse):
         #y1 = tf.Print(y1, [y1], message="y1")        
     return y1, y2, A, B
 
-def data_network(x, z, n_layer=2, n_hidden=256, reuse=False):
+def data_network(x, z, n_layer=1, n_hidden=128, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
     Arguments:
         x: Data matrix of dimension (batch_size, inp_data_dim)
@@ -145,9 +145,14 @@ def data_network(x, z, n_layer=2, n_hidden=256, reuse=False):
         # variable_summaries(h)
     return h
 
-def cal_loss(x, z, y1, x_sample, z_sample, z_x_sample_encoded):
+def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
     with tf.variable_scope("Loss"):
-        g_x_z = data_network(x, z)
+        g_x_z = data_network(x, z_list[0])
+        g_x_z_list = [g_x_z]
+        for i in range(1,len(z_list)):
+            g_x_z_list.append(data_network(x,z_list[i],reuse=True))
+        g_x_z = -tf.truediv(tf.add_n(g_x_z_list),len(g_x_z_list))
+
         # g_x_z_s = graph_replace(g_x_z, {x:x_sample, z:z_sample})
         g_x_z_s = data_network(x_sample, z_sample, reuse=True)
         with tf.name_scope("Si_maximise"):
@@ -164,12 +169,21 @@ def cal_loss(x, z, y1, x_sample, z_sample, z_x_sample_encoded):
         #     tp = f2-f1
             # tp = f1
         with tf.name_scope("theta"):
-            tmp = tf.norm(z_sample-z_x_sample_encoded, axis=1)
+            tmp_list = []
+            for i in range(len(z_x_sample_encoded_list)):
+                tmp = tf.norm(z_sample-z_x_sample_encoded[i], axis=1)
+                tmp_list.append(tmp)
+            tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list))
             t = tf.truediv(tf.reduce_sum(g_x_z_s), g_x_z_s.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
 
         with tf.name_scope("phi"):
-            tmp = tf.norm(x-y1, axis=1)
-            p = -1.0*tf.truediv(tf.reduce_sum(g_x_z), g_x_z.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
+            # tmp = tf.norm(x-y1, axis=1)
+            tmp_list = []
+            for i in range(len(y1_list)):
+                tmp_list.append(tf.norm(x-y1_list[i], axis=1))
+            tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list))
+
+            p = tf.truediv(tf.reduce_sum(g_x_z), g_x_z.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
             
     return si, t, p
 
@@ -274,6 +288,12 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
             acc_std.append(accuracy_abs)
             print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f accuracy:%f"%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1], accuracy))
 
+        y1_out_list = []
+        for i in range(40):
+            y1_ = sess.run(y1, feed_dict={x:XC_dataset[:,0:inp_data_dim]})
+            y1_out_list.append(y1_)
+        y1_ = np.array(y1_out_list)
+        y1_ = np.mean(y1_, axis=0)
         train_writer.close()
         np.save("/opt/data/saket/gene_data/data/y1_elu_100_100_5.npy", y1_)
         np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
@@ -305,9 +325,17 @@ def main():
 
     eps2 = standard_normal([batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
     eps1 = standard_normal([batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
-    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False)
+    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, False)
     y1, y2, A, B = decoder_network(z1, z2, c, False)
     z = tf.concat([z1,z2], axis=1)
+    z_list = [z]
+    y1_list = [y1]
+    for i in range(10):
+        z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+        y1, y2, A, B = decoder_network(z1, z2, c, True)
+        z = tf.concat([z1,z2], axis=1)
+        z_list.append(z)
+        y1_list.append(y1)
 
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
     z_sample = MVN.sample(n_samples)
@@ -315,18 +343,23 @@ def main():
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
     x_sample, _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True)
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
-    z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+    z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
+    for i in range(10):
+        z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+        z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
+        z_x_sample_encoded_list.append(z_x_sample_encoded)
 
+    ########### Test Dataset
     eps2 = standard_normal([test_batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
     eps1 = standard_normal([test_batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
-    z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+    z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
     y1_t, y2_t, _ , _ = decoder_network(z1_t, z2_t, C_t, True)
     test_accuracy = tf.reduce_mean(tf.square(y1_t-X_t))
     test_abs = tf.reduce_mean(tf.abs(y1_t-X_t))
     test_std = tf.sqrt(tf.reduce_mean(tf.square(tf.abs(y1_t-X_t) - tf.reduce_mean(tf.abs(y1_t-X_t)))))
 
-    si, theta, phi = cal_loss(x, z, y1, x_sample, z_sample, z_x_sample_encoded)
+    si, theta, phi = cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list)
     recon_loss = tf.reduce_mean(tf.square(y1-x))
     recon_abs = tf.reduce_mean(tf.abs(y1-x))
     recon_std = tf.sqrt(tf.reduce_mean(tf.square(tf.abs(y1-x) - tf.reduce_mean(tf.abs(y1-x)))))

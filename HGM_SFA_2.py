@@ -1,9 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import tensorflow as tf
 import pickle as pkl
 from tensorflow.contrib.tensorboard.plugins import projector
+import numpy as np
 
 import os
 import sys
@@ -32,11 +32,12 @@ inp_cov_dim = 10 #d'
 latent_dim = 80 #k
 batch_size = 160 
 test_batch_size = 52
-eps_dim = 40
-enc_net_hidden_dim = 128
+eps_dim = 80
+enc_net_hidden_dim = 256
 n_samples = batch_size
-n_epoch = 500
+n_epoch = 25000
 cyc = 5
+include_cyc = True
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
@@ -124,7 +125,7 @@ def decoder_network(z1, z2, c, reuse):
         #y1 = tf.Print(y1, [y1], message="y1")        
     return y1, y2, A, B
 
-def data_network(x, z, n_layer=1, n_hidden=128, reuse=False):
+def data_network(x, z, n_layer=1, n_hidden=256, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
     Arguments:
         x: Data matrix of dimension (batch_size, inp_data_dim)
@@ -149,18 +150,29 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
     with tf.variable_scope("Loss"):
         g_x_z = data_network(x, z_list[0])
         g_x_z_list = [g_x_z]
+        g_x_z_log_list = [g_x_z - tf.nn.softplus(g_x_z)]
         for i in range(1,len(z_list)):
-            g_x_z_list.append(data_network(x,z_list[i],reuse=True))
-        g_x_z = -tf.truediv(tf.add_n(g_x_z_list),len(g_x_z_list))
+            g_x_z = data_network(x,z_list[i],reuse=True)
+            g_x_z_list.append(g_x_z)
+            g_x_z_log_list.append(g_x_z - tf.nn.softplus(g_x_z))
+        g_x_z = -tf.truediv(tf.add_n(g_x_z_list),len(g_x_z_list)*1.0)
 
         # g_x_z_s = graph_replace(g_x_z, {x:x_sample, z:z_sample})
         g_x_z_s = data_network(x_sample, z_sample, reuse=True)
+        
         with tf.name_scope("Si_maximise"):
-            f1 = g_x_z - tf.nn.softplus(g_x_z)
+            tmp = tf.add_n(g_x_z_log_list)/(len(g_x_z_log_list)*1.0)
+            f1 = tf.reduce_sum(tmp)/(tmp.get_shape().as_list()[0]*1.0)
             f2 = -tf.nn.softplus(g_x_z_s)
-            f1 = tf.truediv(tf.reduce_sum(f1), f1.get_shape().as_list()[0]*1.0)
-            f2 = tf.truediv(tf.reduce_sum(f2), f2.get_shape().as_list()[0]*1.0)
-            si = f1+f2
+            f2 = tf.reduce_sum(f2)/(f2.get_shape().as_list()[0]*1.0)
+            si = f1+f2 # maximize this quantity
+
+       # with tf.name_scope("Si_maximise"):
+#            f1 = g_x_z - tf.nn.softplus(g_x_z)
+#            f2 = -tf.nn.softplus(g_x_z_s)
+#            f1 = tf.truediv(tf.reduce_sum(f1), f1.get_shape().as_list()[0]*1.0)
+#            f2 = tf.truediv(tf.reduce_sum(f2), f2.get_shape().as_list()[0]*1.0)
+#            si = f1+f2
             # si = f1
         
         # with tf.name_scope("theta_phi"):
@@ -168,26 +180,51 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
         #     f2 = tf.truediv(tf.reduce_sum(g_x_z_s), g_x_z_s.get_shape().as_list()[0]*1.0)
         #     tp = f2-f1
             # tp = f1
-        with tf.name_scope("theta"):
-            tmp_list = []
-            for i in range(len(z_x_sample_encoded_list)):
-                tmp = tf.norm(z_sample-z_x_sample_encoded[i], axis=1)
-                tmp_list.append(tmp)
-            tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list))
-            t = tf.truediv(tf.reduce_sum(g_x_z_s), g_x_z_s.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
-
         with tf.name_scope("phi"):
-            # tmp = tf.norm(x-y1, axis=1)
-            tmp_list = []
-            for i in range(len(y1_list)):
-                tmp_list.append(tf.norm(x-y1_list[i], axis=1))
-            tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list))
+            g_x_z = tf.add_n(g_x_z_list)/(len(g_x_z_list)*1.0)
+            p = tf.reduce_sum(g_x_z)/(g_x_z.get_shape().as_list()[0]*1.0)
+            # Adding cyclic consistency
+            if include_cyc:
+                norm_list = []
+                for i in range(len(y1_list)):
+                    norm = tf.norm(x-y1_list[i], axis=1)
+                    norm_list.append(norm)
+                norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
+                norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
+                p = p+cyc*norm
 
-            p = tf.truediv(tf.reduce_sum(g_x_z), g_x_z.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
+        with tf.name_scope("theta"):
+            t = tf.reduce_sum(g_x_z_s)/(g_x_z_s.get_shape().as_list()[0]*1.0)
+            t = -t
+            if include_cyc:
+                norm_list = []
+                for i in range(len(z_x_sample_encoded_list)):
+                    norm = tf.norm(z_sample-z_x_sample_encoded_list[i], axis=1)
+                    norm_list.append(norm)
+                norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
+                norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
+                t = t+cyc*norm
+
+        #with tf.name_scope("theta"):
+        #    tmp_list = []
+        #    for i in range(len(z_x_sample_encoded_list)):
+        #        tmp = tf.norm(z_sample-z_x_sample_encoded_list[i], axis=1)
+        #        tmp_list.append(tmp)
+        #    tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list)*1.0)
+        #    t = tf.truediv(tf.reduce_sum(g_x_z_s), g_x_z_s.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
+
+        #with tf.name_scope("phi"):
+        #    # tmp = tf.norm(x-y1, axis=1)
+        #    tmp_list = []
+        #    for i in range(len(y1_list)):
+        #        tmp_list.append(tf.norm(x-y1_list[i], axis=1))
+        #    tmp = tf.truediv(tf.add_n(tmp_list), len(tmp_list)*1.0)
+
+        #    p = tf.truediv(tf.reduce_sum(g_x_z), g_x_z.get_shape().as_list()[0]*1.0) + cyc*tf.truediv(tf.reduce_sum(tmp), tmp.get_shape().as_list()[0]*1.0)
             
     return si, t, p
 
-def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, recon_std, test_abs, test_std, A, B):
+def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_assign):
 
     t_vars = tf.trainable_variables()
     evars = [var for var in t_vars if var.name.startswith("encoder")]
@@ -199,8 +236,12 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
     r_loss = tf.losses.get_total_loss() 
     opt = tf.train.AdamOptimizer(1e-4)
     train_si = opt.minimize(-si+r_loss, var_list=lvars)
-    train_t = opt.minimize(t+r_loss, var_list=dvars)
-    train_p = opt.minimize(p+r_loss, var_list=evars)
+    if include_cyc:
+        train_t = opt.minimize(t+r_loss, var_list=dvars)
+        train_p = opt.minimize(p+r_loss, var_list=evars)
+    else:
+        tp = t+p+r_loss
+        train_tp = opt.minimize(t+p+r_loss, var_list = dvars+evars)
 
     merged = tf.summary.merge_all()
     s_loss = []
@@ -233,10 +274,12 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
 
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         saver = tf.train.Saver(save_relative_paths=True)
+        #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-24900"))
         for epoch in range(n_epoch):
             #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
+            sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
 
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
@@ -250,7 +293,7 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
                         train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+j))
                         train_writer.add_summary(summary, epoch*6+j)
                     else:                    
-                        si_loss, _ , _ , _ = sess.run([si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        si_loss, _ , _ , _ = sess.run([si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
                     s_loss.append(si_loss)
                     # except:
                         # train_writer.close()
@@ -260,15 +303,25 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
                     if epoch % 100 == 0 and i == 0:
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                         run_metadata = tf.RunMetadata()
-                        summary, t_loss, _ , _ , _  = sess.run([merged, t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
-                        summary, p_loss, _ , _ , _  = sess.run([merged, p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        if include_cyc:
+                            summary, t_loss, _ , _ , _  = sess.run([merged, t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                            summary, p_loss, _ , _ , _  = sess.run([merged, p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        else:
+                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
                         train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+5+j))
                         train_writer.add_summary(summary, epoch*6+5+j)
                     else:
-                        t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
-                        p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
-                    t_loss_list.append(t_loss)
-                    p_loss_list.append(p_loss)
+                        if include_cyc:
+                            t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
+                            p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
+                        else:
+                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                    if include_cyc:
+                        t_loss_list.append(t_loss)
+                        p_loss_list.append(p_loss)
+                    else:
+                        t_loss_list.append(tp_loss)
+                        p_loss_list.append(0)
                     #except:
                 rec_loss, rec_abs, rec_std = sess.run([recon_loss, recon_abs, recon_std], feed_dict={x:xmb,c:cmb})
                 re_loss.append(rec_loss)
@@ -282,20 +335,33 @@ def train(si, t, p, x, c, recon_loss, test_accuracy, y1, z1, z2, recon_abs, reco
             if epoch%100 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
-            accuracy, accuracy_std, accuracy_abs = sess.run([test_accuracy, test_std, test_abs])
-            acc.append(accuracy)
-            acc_abs.append(accuracy_std)
-            acc_std.append(accuracy_abs)
-            print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f accuracy:%f"%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1], accuracy))
+            #accuracy, accuracy_std, accuracy_abs = sess.run([test_accuracy, test_std, test_abs])
+            #acc.append(accuracy)
+            #acc_abs.append(accuracy_std)
+            #acc_std.append(accuracy_abs)
+            print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f "%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1]))
 
         y1_out_list = []
-        for i in range(40):
-            y1_ = sess.run(y1, feed_dict={x:XC_dataset[:,0:inp_data_dim]})
+        for i in range(250):
+            y1_ = sess.run(y1, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
             y1_out_list.append(y1_)
         y1_ = np.array(y1_out_list)
-        y1_ = np.mean(y1_, axis=0)
+        #y1_ = np.mean(y1_, axis=0)
+        y1_out_list = []
+        eps2 = standard_normal([test_batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
+        eps1 = standard_normal([test_batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
+        z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+        y1_t, y2_t, _ , _ = decoder_network(z1_t, z2_t, C_t, True)
+        for i in range(250):
+            y1t_ = sess.run(y1_t)
+            y1_out_list.append(y1t_)
+        y1_t_ = np.array(y1_out_list)
+
         train_writer.close()
-        np.save("/opt/data/saket/gene_data/data/y1_elu_100_100_5.npy", y1_)
+    with open("/opt/data/saket/gene_data/data/y1_elu_100_100_5.pkl", "wb") as pkl_file:
+        pkl.dump(y1_, pkl_file)
+        #np.save("", y1_)
+        np.save("/opt/data/saket/gene_data/data/y1t.npy", y1_t_)
         np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
         np.save("/opt/data/saket/gene_data/data/B_elu_100_100_5.npy", B_)
     with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
@@ -338,7 +404,9 @@ def main():
         y1_list.append(y1)
 
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
-    z_sample = MVN.sample(n_samples)
+    z_sample_ = MVN.sample(n_samples)
+    z_sample = tf.Variable(np.ones((n_samples, latent_dim+inp_data_dim), dtype=np.float32))
+    z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
@@ -351,18 +419,11 @@ def main():
         z_x_sample_encoded_list.append(z_x_sample_encoded)
 
     ########### Test Dataset
-    eps2 = standard_normal([test_batch_size, eps_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
-    eps1 = standard_normal([test_batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
-    z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
-    y1_t, y2_t, _ , _ = decoder_network(z1_t, z2_t, C_t, True)
-    test_accuracy = tf.reduce_mean(tf.square(y1_t-X_t))
-    test_abs = tf.reduce_mean(tf.abs(y1_t-X_t))
-    test_std = tf.sqrt(tf.reduce_mean(tf.square(tf.abs(y1_t-X_t) - tf.reduce_mean(tf.abs(y1_t-X_t)))))
 
     si, theta, phi = cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list)
     recon_loss = tf.reduce_mean(tf.square(y1-x))
     recon_abs = tf.reduce_mean(tf.abs(y1-x))
     recon_std = tf.sqrt(tf.reduce_mean(tf.square(tf.abs(y1-x) - tf.reduce_mean(tf.abs(y1-x)))))
-    train(si, theta, phi, x, c,recon_loss, test_accuracy, y1, z1, z2, recon_abs, recon_std, test_abs, test_std, A, B)
+    train(si, theta, phi, x, c,recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_assign)
 
 main()

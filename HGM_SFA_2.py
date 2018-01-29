@@ -29,10 +29,10 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 80 #k
+latent_dim = 50 #k
 batch_size = 160 
 test_batch_size = 52
-eps_dim = 80
+eps_dim = 50
 enc_net_hidden_dim = 256
 n_samples = batch_size
 n_epoch = 25000
@@ -148,17 +148,18 @@ def data_network(x, z, n_layer=1, n_hidden=256, reuse=False):
 
 def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
     with tf.variable_scope("Loss"):
-        g_x_z = data_network(x, z_list[0])
-        g_x_z_list = [g_x_z]
-        g_x_z_log_list = [g_x_z - tf.nn.softplus(g_x_z)]
+        g_x_z1 = data_network(x, z_list[0])
+        g_x_z_list = [g_x_z1]
+        g_x_z_log_list = [g_x_z1 - tf.nn.softplus(g_x_z1)]
         for i in range(1,len(z_list)):
-            g_x_z = data_network(x,z_list[i],reuse=True)
-            g_x_z_list.append(g_x_z)
-            g_x_z_log_list.append(g_x_z - tf.nn.softplus(g_x_z))
+            #g_x_z = data_network(x,z_list[i],reuse=True)
+            g_x_z1 = graph_replace(g_x_z1, {z_list[i-1]:z_list[i]})
+            g_x_z_list.append(g_x_z1)
+            g_x_z_log_list.append(g_x_z1 - tf.nn.softplus(g_x_z1))
         g_x_z = -tf.truediv(tf.add_n(g_x_z_list),len(g_x_z_list)*1.0)
 
-        # g_x_z_s = graph_replace(g_x_z, {x:x_sample, z:z_sample})
-        g_x_z_s = data_network(x_sample, z_sample, reuse=True)
+        #g_x_z_s = data_network(x_sample, z_sample, reuse=True)
+        g_x_z_s = graph_replace(g_x_z1, {x:x_sample, z_list[0]:z_sample})
         
         with tf.name_scope("Si_maximise"):
             tmp = tf.add_n(g_x_z_log_list)/(len(g_x_z_log_list)*1.0)
@@ -273,18 +274,19 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
     with tf.Session() as sess:
 
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
+        sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         saver = tf.train.Saver(save_relative_paths=True)
         #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-24900"))
         for epoch in range(n_epoch):
             #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
-            sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
+            #sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
 
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
-                for j in range(5):
+                for j in range(1):
                     # try:
                     if epoch % 100 == 0 and i == 0:
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -332,7 +334,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
                 A_, B_ = sess.run([A, B], feed_dict={x:xmb,c:cmb})
                 #print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
-            if epoch%100 == 0:
+            if epoch%1000 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
             #accuracy, accuracy_std, accuracy_abs = sess.run([test_accuracy, test_std, test_abs])
@@ -396,12 +398,14 @@ def main():
     z = tf.concat([z1,z2], axis=1)
     z_list = [z]
     y1_list = [y1]
-    for i in range(10):
-        z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
-        y1, y2, A, B = decoder_network(z1, z2, c, True)
-        z = tf.concat([z1,z2], axis=1)
-        z_list.append(z)
-        y1_list.append(y1)
+#    for i in range(10):
+#        #z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+#        z1, z2 = graph_replace([z1,z2], {x:x,c:c})
+#        #y1, y2, A, B = decoder_network(z1, z2, c, True)
+#        y1,y2 = graph_replace([y1,y2],{z1:z1,z2:z2})
+#        z = tf.concat([z1,z2], axis=1)
+#        z_list.append(z)
+#        y1_list.append(y1)
 
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
     z_sample_ = MVN.sample(n_samples)
@@ -409,14 +413,16 @@ def main():
     z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
-    # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
-    x_sample, _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True)
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+    #x_sample, _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True)
+    x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
+    #z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+    z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
-    for i in range(10):
-        z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
-        z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
-        z_x_sample_encoded_list.append(z_x_sample_encoded)
+#    for i in range(10):
+#        #z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
+#        z1_x_e, z2_x_e = graph_replace([z1_x_e, z2_x_e], {x:x_sample})
+#        z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
+#        z_x_sample_encoded_list.append(z_x_sample_encoded)
 
     ########### Test Dataset
 

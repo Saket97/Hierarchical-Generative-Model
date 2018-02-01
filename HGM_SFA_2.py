@@ -36,6 +36,7 @@ eps_dim = 10
 enc_net_hidden_dim = 256
 n_samples = batch_size
 n_epoch = 25000
+niter_clf = 1000
 cyc = 5
 include_cyc = True
 # filename = "M255.pkl"
@@ -44,6 +45,7 @@ def load_dataset():
     raw_data=np.load('/opt/data/saket/gene_data/data/mod_total_data.npy')
     #raw_data=np.load('gene_data/data/data_3k.npy')
     cov = np.load('/opt/data/saket/gene_data/data/cov1.npy')
+    labels = np.load('/opt/data/saket/gene_data/data/data_label.npy')
     #cov = np.load('gene_data/data/cov1.npy')
     raw_data = np.log10(raw_data+0.1)
     cov = np.log10(cov+0.1)
@@ -60,9 +62,9 @@ def load_dataset():
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
-    return raw_data[0:160], cov[0:160,:], raw_data[160:], cov[160:]
+    return raw_data[0:160], cov[0:160,1:], labels[0:160], raw_data[160:], cov[160:, 1:], labels[160:]
 
-X_dataset, C_dataset, X_t, C_t = load_dataset()
+X_dataset, C_dataset, raw_labels, X_t, C_t, test_labels = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 print("Dataset Loaded... X:", np.shape(X_dataset), " C:", np.shape(C_dataset))
 
@@ -203,6 +205,13 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
             
     return si, t, p
 
+def classifier(z_input, labels, reuse):
+    with tf.variable_scope("Classifier", reuse = reuse):
+        out_logits = tf.layers.dense(z_input, 3, use_bias=True, kernel_initializer=tf.truncated_normal_initializer, kernel_regularizer=slim.l2_regularizer(0.1))
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=out_logits, labels=labels)
+        return loss, out_logits
+ 
+
 def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_assign):
 
     t_vars = tf.trainable_variables()
@@ -318,10 +327,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
             if epoch%1000 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
-            #accuracy, accuracy_std, accuracy_abs = sess.run([test_accuracy, test_std, test_abs])
-            #acc.append(accuracy)
-            #acc_abs.append(accuracy_std)
-            #acc_std.append(accuracy_abs)
+
             print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f "%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1]))
 
         y1_out_list = []
@@ -341,6 +347,38 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
         y1_t_ = np.array(y1_out_list)
 
         train_writer.close()
+
+        ################### Adding classifier #########################
+        print ("Adding Classifier...")
+        z_input = tf.placeholder(dtype = tf.float32, shape = (None, latent_dim))
+        labels = tf.placeholder(dtype=tf.int64, shape=(None))
+        loss, out_logits = classifier(z_input, labels)
+        t_vars = tf.trainable_variables()
+        cvar = [var for var in t_vars if var.name.startswith("Classifier")]
+        r_loss = tf.losses.get_regularization_loss(scope="Classifier")
+        train_clf = opt.minimize(loss+r_loss, var_list=cvar)
+        closs = []
+        for i in range(niter_clf):
+            z2_ = sess.run(z2, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
+            loss, _ = sess.run([loss, train_clf], feed_dict={z_input:z2_, labels:raw_labels})
+            print("step:%d loss:%f"%(i, loss))
+            closs.append(loss)
+        
+        z2t_list = []
+        for i in range(250):
+            z2t_ = sess.run(z2_t)
+            out_logits = sess.run(out_logits, feed_dict={z_input:z2_t, labels:test_labels})
+            z2t_list.append(tf.nn.softmax(out_logits))
+        z2t_out = np.array(z2t_list)
+        z2t_out = np.mean(z2t_out, axis=0)
+        pred_labels = np.argmax(z2t_out, axis=1)
+        test_accuracy = tf.metrics.accuracy(test_labels, pred_labels)
+        print("Test classification Accuracy:", test_accuracy)
+        save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
+        print ("Model saved at: ", save_path)
+        ######################################################################
+
+
     with open("/opt/data/saket/gene_data/data/y1_elu_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(y1_, pkl_file)
         #np.save("", y1_)

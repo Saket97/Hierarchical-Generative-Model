@@ -29,10 +29,10 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 50 #k
+latent_dim = 10 #k
 batch_size = 160 
 test_batch_size = 52
-eps_dim = 50
+eps_dim = 10
 enc_net_hidden_dim = 256
 n_samples = batch_size
 n_epoch = 25000
@@ -52,7 +52,11 @@ def load_dataset():
     global inp_cov_dim
     inp_cov_dim = np.shape(cov)[1]
     assert(np.shape(raw_data)[0] == np.shape(cov)[0])
+    raw_data_mean = np.mean(raw_data, axis=0)
+    raw_data = (raw_data-1.0*raw_data_mean)
     print("raw min",np.min(raw_data))
+    cov_data_mean = np.mean(cov, axis=0)
+    cov_data = (cov-1.0*cov_data_mean)
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
@@ -83,14 +87,14 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse
     with tf.variable_scope("encoder", reuse = reuse):
 
         h = tf.concat([x, c, eps1], 1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
-        variable_summaries(h, name="enc_z1_hidden layer")
-        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.1), biases_regularizer=slim.l2_regularizer(0.1))
+        variable_summaries(h, name="enc_z1_hidden_layer_output")
+        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1), biases_regularizer=slim.l2_regularizer(0.1))
 
         h = tf.concat([x, c, z1, eps2], axis=1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
-        variable_summaries(h, name="enc_z2_hidden layer")
-        z2 = slim.fully_connected(h, z2_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5), biases_regularizer=slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1), biases_regularizer=slim.l2_regularizer(0.1))
+        variable_summaries(h, name="enc_z2_hidden_layer_output")
+        z2 = slim.fully_connected(h, z2_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1), biases_regularizer=slim.l2_regularizer(0.1))
         
         #z1 = tf.Print(z1, [z1], message="z1")
         #z2 = tf.Print(z2, [z2], message="z2")
@@ -111,7 +115,7 @@ def decoder_network(z1, z2, c, reuse):
     assert(z1.get_shape().as_list()[0] == z2.get_shape().as_list()[0])
     with tf.variable_scope("decoder", reuse = reuse):
         inp = tf.concat([z2,c], axis=1)
-        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=slim.xavier_initializer(), kernel_regularizer=slim.l1_regularizer(0.1))
+        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.orthogonal_initializer(), kernel_regularizer=slim.l1_regularizer(0.05))
         print("y2_name:",y2.name)
         weights = tf.get_default_graph().get_tensor_by_name("decoder/dense"+"/kernel:0")
         DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
@@ -124,6 +128,8 @@ def decoder_network(z1, z2, c, reuse):
         variable_summaries(DELTA, name="DELTA")
         variable_summaries(y1, name="y1")
         variable_summaries(y2, name="y2")
+        variable_summaries(A, name="A")
+        variable_summaries(B, name="B")
         #y1 = tf.Print(y1, [y1], message="y1")        
     return y1, y2, A, B
 
@@ -140,9 +146,9 @@ def data_network(x, z, n_layer=1, n_hidden=256, reuse=False):
     with tf.variable_scope("data_network", reuse = reuse):
         h = tf.concat([x,z], axis=1)
         #variable_summaries(h)
-        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5))
+        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
         variable_summaries(h, name="data_network_hidden")
-        h = slim.fully_connected(h, 1, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.5))
+        h = slim.fully_connected(h, 1, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
         variable_summaries(h, name="data_net_output")
         #h = tf.Print(h,[h],message="h data_network")
         # variable_summaries(h)
@@ -206,7 +212,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
     print("evars:", evars)
     print("dvars:",dvars)
     print("lvars:",lvars)
-    r_loss = tf.losses.get_total_loss() 
+    r_loss = tf.losses.get_regularization_loss() 
     opt = tf.train.AdamOptimizer(1e-4)
     train_si = opt.minimize(-si+r_loss, var_list=lvars)
     if include_cyc:
@@ -239,8 +245,11 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
     assign_z2 = tf.assign(embedding_var, z2)
     embedding = config.embeddings.add()
     embedding.tensor_name = embedding_var.name
-
     projector.visualize_embeddings(train_writer, config)        
+    
+   # embedding = config.embeddings.add()
+   # embedding.tensor_name = x.name 
+   # projector.visualize_embeddings(train_writer, config)        
     #weights = tf.get_variable("decoder/dense/kernel:0")
     #print(tf.trainable_variables())
     with tf.Session() as sess:
@@ -248,7 +257,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         saver = tf.train.Saver(save_relative_paths=True)
         # sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
-        #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-24900"))
+        #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-19000"))
         for epoch in range(n_epoch):
             #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
@@ -367,10 +376,11 @@ def main():
     eps1 = standard_normal([batch_size, eps_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
     z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, False)
     y1, y2, A, B = decoder_network(z1, z2, c, False)
+    variable_summaries(y1, name="y1_for_input_x")
     z = tf.concat([z1,z2], axis=1)
     z_list = [z]
     y1_list = [y1]
-    for i in range(100):
+    for i in range(10):
         z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
         # z1, z2 = graph_replace([z1,z2], {x:x,c:c})
         y1, y2, A, B = decoder_network(z1, z2, c, True)
@@ -381,6 +391,7 @@ def main():
 
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
     z_sample_ = MVN.sample(n_samples)
+    z_sample_ = tf.Print(z_sample_, [z_sample_], message="Sample z....")
     z_sample = tf.Variable(np.ones((n_samples, latent_dim+inp_data_dim), dtype=np.float32))
     z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
@@ -390,7 +401,7 @@ def main():
     z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
     # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
-    for i in range(100):
+    for i in range(10):
         z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 1, inp_data_dim, latent_dim, eps1, eps2, True)
         # z1_x_e, z2_x_e = graph_replace([z1_x_e, z2_x_e], {x:x_sample})
         z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)

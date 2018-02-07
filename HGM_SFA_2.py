@@ -32,8 +32,8 @@ inp_cov_dim = 10 #d'
 latent_dim = 100 #k
 batch_size = 160 
 test_batch_size = 52
-eps2_dim = 20
-eps1_dim = 10
+eps2_dim = 10
+eps1_dim = 15
 enc_net_hidden_dim = 512
 n_samples = batch_size
 n_epoch = 2500
@@ -92,15 +92,15 @@ def standard_normal(shape, **kwargs):
 def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse):
     with tf.variable_scope("encoder", reuse = reuse):
 
-        h = tf.concat([x, c, eps1], 1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.1))
-        variable_summaries(h, name="enc_z1_hidden_layer_output")
-        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
-
-        h = tf.concat([x, c, z1, eps2], axis=1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        h = tf.concat([x, c, eps2], 1)
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.1))
         variable_summaries(h, name="enc_z2_hidden_layer_output")
         z2 = slim.fully_connected(h, z2_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+
+        h = tf.concat([x, c, z2, eps1], axis=1)
+        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        variable_summaries(h, name="enc_z1_hidden_layer_output")
+        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
         
         #z1 = tf.Print(z1, [z1], message="z1")
         #z2 = tf.Print(z2, [z2], message="z2")

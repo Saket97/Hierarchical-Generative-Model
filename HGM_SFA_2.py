@@ -29,7 +29,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 """ Parameters """
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 90 #k
+latent_dim = 100 #k
 batch_size = 160 
 test_batch_size = 52
 eps2_dim = 20

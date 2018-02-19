@@ -36,18 +36,20 @@ eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
 n_samples = batch_size
-n_epoch = 2500
+n_epoch = 5000
 niter_clf = 15000
-cyc_x = 50
+cyc_x = 10
 cyc_z = 5
 cyc1 = 0
 include_cyc = True
+keep_prob = 1
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
     raw_data=np.load('/opt/data/saket/gene_data/data/mod_total_data.npy')
     #raw_data=np.load('gene_data/data/data_3k.npy')
     cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
+    print ("cov:", cov)
     labels = np.load('/opt/data/saket/gene_data/data/data_label.npy')
     #cov = np.load('gene_data/data/cov1.npy')
     #raw_data = np.log10(raw_data+0.1)
@@ -62,7 +64,7 @@ def load_dataset():
     raw_data = (raw_data-1.0*raw_data_mean)
     print("raw min",np.min(raw_data))
     cov_data_mean = np.mean(cov, axis=0)
-    cov_data = (cov-1.0*cov_data_mean)
+    #cov_data = (cov-1.0*cov_data_mean)
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
@@ -89,13 +91,14 @@ def standard_normal(shape, **kwargs):
     return tf.cast(st.StochasticTensor(
         ds.MultivariateNormalDiag(tf.zeros(shape), tf.ones(shape), **kwargs)),  tf.float32)
 
-def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse):
+def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse, prob):
     with tf.variable_scope("encoder", reuse = reuse):
 
         h = tf.concat([x, c, eps1], 1)
         h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.1))
         variable_summaries(h, name="enc_z1_hidden_layer_output")
         z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        z1 = tf.nn.dropout(z1, prob)
 
         h = tf.concat([x, c, z1, eps2], axis=1)
         h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
@@ -108,7 +111,7 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse
         variable_summaries(z2, name="z2")
     return z1, z2
 
-def decoder_network(z1, z2, c, reuse):
+def decoder_network(z1, z2, c, reuse, noise):
     """ Create the decoder network with skip connections. 
     Arguments:
         z1: components of the latent features z which is given as input at layer 1
@@ -121,7 +124,7 @@ def decoder_network(z1, z2, c, reuse):
     assert(z1.get_shape().as_list()[0] == z2.get_shape().as_list()[0])
     with tf.variable_scope("decoder", reuse = reuse):
         inp = tf.concat([z2,c], axis=1)
-        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.orthogonal_initializer(gain=2), kernel_regularizer=slim.l1_regularizer(1.0))
+        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.orthogonal_initializer(gain=3), kernel_regularizer=slim.l1_regularizer(1.0))
         print("y2_name:",y2.name)
         weights = tf.get_default_graph().get_tensor_by_name("decoder/dense"+"/kernel:0")
         DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
@@ -137,7 +140,7 @@ def decoder_network(z1, z2, c, reuse):
         variable_summaries(A, name="A")
         variable_summaries(B, name="B")
         #y1 = tf.Print(y1, [y1], message="y1")        
-    return y1, y2, A, B
+    return y1, y2, A, B, DELTA
 
 def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
@@ -237,7 +240,7 @@ def get_indices():
     np.random.shuffle(r)
     return r 
 
-def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_assign, z_input, labels, loss, out_logits, out_soft):
+def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D, z_assign, z_input, labels, loss, out_logits, out_soft, prob):
 
     t_vars = tf.trainable_variables()
     evars = [var for var in t_vars if var.name.startswith("encoder")]
@@ -297,12 +300,12 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         saver = tf.train.Saver(save_relative_paths=True)
         # sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
-        #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_51/", "model.ckpt-2000"))
+        #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-4000"))
         for epoch in range(n_epoch):
             #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
-            sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
+            sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:], prob:keep_prob})
 
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
@@ -312,11 +315,11 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
                     if epoch % 100 == 0 and i == 0:
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                         run_metadata = tf.RunMetadata()
-                        summary, si_loss, _ , _ , _ = sess.run([merged, si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                        summary, si_loss, _ , _ , _ = sess.run([merged, si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
                         train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+j))
                         train_writer.add_summary(summary, epoch*6+j)
                     else:                    
-                        si_loss, _ , _ , _ = sess.run([si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
+                        si_loss, _ , _ , _ = sess.run([si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
                     s_loss.append(si_loss)
                     # except:
                         # train_writer.close()
@@ -327,18 +330,18 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                         run_metadata = tf.RunMetadata()
                         if include_cyc:
-                            summary, t_loss, _ , _ , _  = sess.run([merged, t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
-                            summary, p_loss, _ , _ , _  = sess.run([merged, p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                            summary, t_loss, _ , _ , _  = sess.run([merged, t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
+                            summary, p_loss, _ , _ , _  = sess.run([merged, p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
                         else:
-                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
                         train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+5+j))
                         train_writer.add_summary(summary, epoch*6+5+j)
                     else:
                         if include_cyc:
-                            t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
-                            p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb})
+                            t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                            p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
                         else:
-                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb}, options=run_options,run_metadata=run_metadata)
+                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
                     if include_cyc:
                         t_loss_list.append(t_loss)
                         p_loss_list.append(p_loss)
@@ -352,7 +355,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
                 re_std.append(rec_std)
                 #train_writer.close()
                 y1_ = sess.run(y1, feed_dict={x:xmb,c:cmb}) 
-                A_, B_ = sess.run([A, B], feed_dict={x:xmb,c:cmb})
+                A_, B_, D_ = sess.run([A, B, D], feed_dict={x:xmb,c:cmb})
                 #print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
             if epoch%1000 == 0:
@@ -370,8 +373,9 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
         y1_out_list = []
         eps2 = standard_normal([test_batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
         eps1 = standard_normal([test_batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
-        z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
-        y1_t, y2_t, _ , _ = decoder_network(z1_t, z2_t, C_t, True)
+        noise = standard_normal([test_batch_size, inp_data_dim], name="test_noise") * 1.0 # (batch_size, eps_dim)
+        z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
+        y1_t, y2_t, _ , _ , _ = decoder_network(z1_t, z2_t, C_t, True, noise)
         for i in range(250):
             y1t_ = sess.run(y1_t)
             y1_out_list.append(y1t_)
@@ -429,6 +433,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
         np.save("/opt/data/saket/gene_data/data/test_z2.npy", test_z2)
         np.save("/opt/data/saket/gene_data/data/train_z1.npy", train_z1)
         np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
+        np.save("/opt/data/saket/gene_data/data/D_elu_100_100_5.npy", D_)
         np.save("/opt/data/saket/gene_data/data/B_elu_100_100_5.npy", B_)
         np.save("/opt/data/saket/gene_data/data/closs.npy", closs)
     with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
@@ -453,25 +458,28 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_
 def main():
     tf.reset_default_graph()
 
+    prob = tf.placeholder_with_default(1.0, shape=())
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
 
     MVN_e2 = ds.MultivariateNormalDiag(tf.zeros((eps2_dim)), tf.ones((eps2_dim)))
     MVN_e1 = ds.MultivariateNormalDiag(tf.zeros((eps1_dim)), tf.ones((eps1_dim)))
+    MVN_noise = ds.MultivariateNormalDiag(tf.zeros((inp_data_dim)), tf.ones((inp_data_dim)))
     #eps2 = standard_normal([batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
     eps2 = MVN_e2.sample(batch_size)
     #eps1 = standard_normal([batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
     eps1 = MVN_e1.sample(batch_size)
-    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False)
-    y1, y2, A, B = decoder_network(z1, z2, c, False)
+    noise = MVN_noise.sample(batch_size)
+    z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False, prob)
+    y1, y2, A, B, D = decoder_network(z1, z2, c, False, noise)
     variable_summaries(y1, name="y1_for_input_x")
     z = tf.concat([z1,z2], axis=1)
     z_list = [z]
     y1_list = [y1]
     for i in range(10):
-        z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+        z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         # z1, z2 = graph_replace([z1,z2], {x:x,c:c})
-        y1, y2, A, B = decoder_network(z1, z2, c, True)
+        y1, y2, A, B, D = decoder_network(z1, z2, c, True, noise)
         # y1,y2 = graph_replace([y1,y2],{z1:z1,z2:z2})
         z = tf.concat([z1,z2], axis=1)
         z_list.append(z)
@@ -484,13 +492,13 @@ def main():
     z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
-    x_sample, _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True)
+    x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
     # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
     for i in range(10):
-        z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True)
+        z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         # z1_x_e, z2_x_e = graph_replace([z1_x_e, z2_x_e], {x:x_sample})
         z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
         z_x_sample_encoded_list.append(z_x_sample_encoded)
@@ -505,6 +513,6 @@ def main():
     z_input = tf.placeholder(dtype = tf.float32, shape = (None, latent_dim))
     labels = tf.placeholder(dtype=tf.int64, shape=(None))
     loss, out_logits, out_soft = classifier(z_input, labels, False)
-    train(si, theta, phi, x, c,recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, z_assign, z_input, labels, loss, out_logits, out_soft)
+    train(si, theta, phi, x, c,recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D, z_assign, z_input, labels, loss, out_logits, out_soft, prob)
 
 main()

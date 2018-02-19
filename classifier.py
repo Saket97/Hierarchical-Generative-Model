@@ -7,8 +7,8 @@ from sklearn.svm import SVC
 plt.switch_backend("agg")
 inp_dim = 100
 num_classes = 2
-niter = 1000
-reg  = 0.01
+niter = 2000
+reg  = .05
 
 def get_indices(raw_labels):
 #    i2 = (raw_labels==2).nonzero()[0]
@@ -76,8 +76,8 @@ def main():
     i1 = (labels==1).nonzero()[0]
     i0 = (labels==0).nonzero()[0]
     labels[i1] = 0
-    labels[i2] = 0
-    labels[i0] = 1
+    labels[i2] = 1
+    labels[i0] = 0
 
     train_labels = labels[0:160]
     test_labels = labels[160:]

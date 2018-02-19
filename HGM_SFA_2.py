@@ -163,6 +163,12 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
         # variable_summaries(h)
     return h
 
+def transform_z2(z2, reuse=False):
+    with tf.variable_scope("transform_z2", reuse = reuse):
+        h = slim.repeat(z2, 3, slim.fully_connected, 256, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
 def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
     with tf.variable_scope("Loss"):
         g_x_z1 = data_network(x, z_list[0])
@@ -247,6 +253,8 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     dvars = [var for var in t_vars if var.name.startswith("decoder")]
     lvars = [var for var in t_vars if var.name.startswith("Loss")]
     cvars = [var for var in t_vars if var.name.startswith("Classifier")]
+    tz2vars = [var for var in t_vars if var.name.startswith("transform_z2")]
+    assert(len(t_vars) == len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
     print("evars:", evars)
     print("dvars:",dvars)
     print("lvars:",lvars)
@@ -257,11 +265,11 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     opt = tf.train.AdamOptimizer(1e-4)
     train_si = opt.minimize(-si+r_loss, var_list=lvars)
     if include_cyc:
-        train_t = opt.minimize(t+r_loss, var_list=dvars)
-        train_p = opt.minimize(p+r_loss, var_list=evars)
+        train_t = opt.minimize(t+r_loss, var_list=dvars+tz2vars)
+        train_p = opt.minimize(p+r_loss, var_list=evars+tz2vars)
     else:
         tp = t+p+r_loss
-        train_tp = opt.minimize(t+p+r_loss, var_list = dvars+evars)
+        train_tp = opt.minimize(t+p+r_loss, var_list = dvars+evars+tz2vars)
 
     train_clf = opt.minimize(loss+r_loss_clf, var_list=cvars)
 
@@ -492,6 +500,8 @@ def main():
     z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
+    z2_sample = transform_z2(z2_sample)
+    z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
     z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)

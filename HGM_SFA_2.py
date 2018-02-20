@@ -38,10 +38,10 @@ eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
 n_samples = batch_size
-n_epoch = 500
-niter_clf = 15000
-cyc_x = 5
-cyc_z = 2
+n_epoch = 1000
+niter_clf = 1500
+cyc_x = 0.1
+cyc_z = 0.1
 cyc1 = 0
 include_cyc = True
 keep_prob = 1
@@ -169,7 +169,7 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 32, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 2, slim.fully_connected, 64, activation_fn=tf.nn.relu, weights_regularizer = slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
@@ -194,12 +194,12 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
             f2 = -tf.nn.softplus(g_x_z_s)
             f2 = tf.reduce_sum(f2)/(f2.get_shape().as_list()[0]*1.0)
             si = f1+f2 # maximize this quantity
-            si = tf.Print(si, [si], message="Si")
+            #si = tf.Print(si, [si], message="Si")
 
         with tf.name_scope("phi"):
             g_x_z = tf.add_n(g_x_z_list)/(len(g_x_z_list)*1.0)
             p = tf.reduce_sum(g_x_z)/(g_x_z.get_shape().as_list()[0]*1.0)
-            p = tf.Print(p,[p],message="Phi without cyclic consistency")
+            #p = tf.Print(p,[p],message="Phi without cyclic consistency")
             # Adding cyclic consistency
             if include_cyc:
                 norm_list = []
@@ -211,13 +211,14 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
                 norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
                 norm_inv = tf.add_n(norm_inv_list)/(len(norm_inv_list)*1.0)
                 norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
+                #norm = tf.Print(norm, [norm], message="phi_norm")
                 norm_inv = tf.reduce_sum(norm_inv)/(norm_inv.get_shape().as_list()[0]*1.0)
                 p = p+cyc_x*norm+cyc1/norm_inv
 
         with tf.name_scope("theta"):
             t = tf.reduce_sum(g_x_z_s)/(g_x_z_s.get_shape().as_list()[0]*1.0)
             t = -t
-            t = tf.Print(t,[t], messaage="Theta without cyclic consistency")
+            #t = tf.Print(t,[t], message="Theta without cyclic consistency")
             if include_cyc:
                 norm_list = []
                 for i in range(len(z_x_sample_encoded_list)):
@@ -225,6 +226,7 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
                     norm_list.append(norm)
                 norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
                 norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
+                #norm = tf.Print(norm, [norm], message="theta_norm")
                 t = t+cyc_z*norm
             
     return si, t, p
@@ -396,12 +398,15 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
 
         train_writer.close()
 
+        save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'modelclf.ckpt'))
+        print ("Model Saved at:", save_path)
+        
         closs = []
         train_z2 = []
         train_z1 = []
         for i in range(niter_clf):
             for j in range(n_train//batch_size):
-                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size][0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size][inp_data_dim:]})
+                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
                 loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_, labels:raw_labels[j*batch_size:(j+1)*batch_size]})
                 pred_labels = np.argmax(out_soft_, axis=1)
                 train_accuracy = (pred_labels==raw_labels[j*batch_size:(j+1)*batch_size])
@@ -419,44 +424,32 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         z2t_out = np.array(test_out_prob)
         z2t_out = np.mean(z2t_out, axis=0)
         pred_labels = np.argmax(z2t_out, axis=1)
-        score = testy[np.arange(0,pred_labels.shape[0]),pred_labels]        
+        score = z2t_out[np.arange(0,pred_labels.shape[0]),pred_labels]        
         test_accuracy = (pred_labels==test_labels)
         test_accuracy = np.sum(test_accuracy)/(test_accuracy.shape[0]*1.0)
         print ("Test Classification Accuracy:", test_accuracy)
         print ("Test ROC Score:", roc_auc_score(test_labels, score))
         save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
         print ("Model Saved at:", save_path)
-
+        A_, B_, D_ = sess.run([A,B,D])
     with open("/opt/data/saket/gene_data/data/y1_elu_100_100_5.pkl", "wb") as pkl_file:
     #    pkl.dump(y1_, pkl_file)
         #np.save("", y1_)
         np.save("/opt/data/saket/gene_data/data/y1_elu_100_100_5.npy", y1_)
         np.save("/opt/data/saket/gene_data/data/y1t.npy", y1_t_)
         #np.save("/opt/data/saket/gene_data/data/train_z2.npy", train_z2)
-        #np.save("/opt/data/saket/gene_data/data/test_z2.npy", test_z2)
+        np.save("/opt/data/saket/gene_data/data/test_z2.npy", test_z2)
         #np.save("/opt/data/saket/gene_data/data/train_z1.npy", train_z1)
         np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
         np.save("/opt/data/saket/gene_data/data/D_elu_100_100_5.npy", D_)
         np.save("/opt/data/saket/gene_data/data/B_elu_100_100_5.npy", B_)
-        #np.save("/opt/data/saket/gene_data/data/closs.npy", closs)
+        np.save("/opt/data/saket/gene_data/data/closs.npy", closs)
     with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(s_loss, pkl_file)
     with open("/opt/data/saket/gene_data/data/t_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(t_loss_list, pkl_file)
     with open("/opt/data/saket/gene_data/data/p_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
         pkl.dump(p_loss_list, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(re_loss, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(acc, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_abs_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(acc_abs, pkl_file)
-    with open("/opt/data/saket/gene_data/data/acc_std_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(acc_std, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_abs_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(re_abs, pkl_file)
-    with open("/opt/data/saket/gene_data/data/re_std_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(re_std, pkl_file)
 
 def main():
     tf.reset_default_graph()
@@ -499,7 +492,7 @@ def main():
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_dim()), np.zeros(eps2.get_shape().as_dim()), True, prob)
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_list()), np.zeros(eps2.get_shape().as_list()), True, prob)
     # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
     for i in range(0):

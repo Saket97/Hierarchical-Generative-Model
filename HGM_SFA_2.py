@@ -3,6 +3,7 @@ import matplotlib.cm as cm
 import tensorflow as tf
 import pickle as pkl
 from tensorflow.contrib.tensorboard.plugins import projector
+from sklearn.metrics import roc_auc_score
 import numpy as np
 
 import os
@@ -193,10 +194,12 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
             f2 = -tf.nn.softplus(g_x_z_s)
             f2 = tf.reduce_sum(f2)/(f2.get_shape().as_list()[0]*1.0)
             si = f1+f2 # maximize this quantity
+            si = tf.Print(si, [si], message="Si")
 
         with tf.name_scope("phi"):
             g_x_z = tf.add_n(g_x_z_list)/(len(g_x_z_list)*1.0)
             p = tf.reduce_sum(g_x_z)/(g_x_z.get_shape().as_list()[0]*1.0)
+            p = tf.Print(p,[p],message="Phi without cyclic consistency")
             # Adding cyclic consistency
             if include_cyc:
                 norm_list = []
@@ -214,6 +217,7 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
         with tf.name_scope("theta"):
             t = tf.reduce_sum(g_x_z_s)/(g_x_z_s.get_shape().as_list()[0]*1.0)
             t = -t
+            t = tf.Print(t,[t], messaage="Theta without cyclic consistency")
             if include_cyc:
                 norm_list = []
                 for i in range(len(z_x_sample_encoded_list)):
@@ -258,14 +262,14 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     cvars = [var for var in t_vars if var.name.startswith("Classifier")]
     tz2vars = [var for var in t_vars if var.name.startswith("transform_z2")]
     #assert(len(t_vars) == len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
-    print("len(t_vars)",len(t_vars))
-    print("len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars)",len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
-    print("tvars:",t_vars)
-    print("evars:", evars)
-    print("dvars:",dvars)
-    print("lvars:",lvars)
-    print("cvars:",cvars)
-    print("tz2vars:",tz2vars)
+    # print("len(t_vars)",len(t_vars))
+    # print("len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars)",len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
+    # print("tvars:",t_vars)
+    # print("evars:", evars)
+    # print("dvars:",dvars)
+    # print("lvars:",lvars)
+    # print("cvars:",cvars)
+    # print("tz2vars:",tz2vars)
     r_loss = tf.losses.get_regularization_loss() 
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss = r_loss - r_loss_clf
@@ -363,15 +367,6 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
                     else:
                         t_loss_list.append(tp_loss)
                         p_loss_list.append(0)
-                    #except:
-                rec_loss, rec_abs, rec_std = sess.run([recon_loss, recon_abs, recon_std], feed_dict={x:xmb,c:cmb})
-                re_loss.append(rec_loss)
-                re_abs.append(rec_abs)
-                re_std.append(rec_std)
-                #train_writer.close()
-                y1_ = sess.run(y1, feed_dict={x:xmb,c:cmb}) 
-                A_, B_, D_ = sess.run([A, B, D], feed_dict={x:xmb,c:cmb})
-                #print ("sTEP:%d si_loss:%f t_loss:%f recon_loss:%f"%(i, s_loss[-1], tp_loss[-1], re_loss[-1]))
                 
             if epoch%1000 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
@@ -401,48 +396,36 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
 
         train_writer.close()
 
-       # ################### Adding classifier #########################
-       # closs = []
-       # train_z2 = []
-       # train_z1 = []
-       # for i in range(niter_clf):
-       #     start = (i*batch_size)%n_train
-       #     z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[start:start+batch_size,0:inp_data_dim], c:XC_dataset[start:start+batch_size,inp_data_dim:]})
-       #     train_z2.append(z2_)
-       #     if i == 0:
-       #         train_z1.append(z1_)
-       #     indices = get_indices()
-       #     loss_, _ , out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_[indices], labels:raw_labels[indices]})
-       #     pred_labels = np.argmax(out_soft_, axis=1)
-       #     train_accuracy = (pred_labels == raw_labels[indices])
-       #     if i%1000 == 0:
-       #         print ("train out logits:",out_logits_)
-       #         print ("train_indices:", raw_labels[indices])
-       #     train_accuracy = np.sum(train_accuracy)/(train_accuracy.shape[0]*1.0)
-       #     print("step:%d loss:%f train_accuracy:%f"%(i, loss_, train_accuracy))
-       #     closs.append((loss_, train_accuracy))
-
-       # z2t_list = []
-       # test_z2 = []
-       # for i in range(100):
-       #     z2t_ = sess.run(z2_t)
-       #     test_z2.append(z2t_)
-       #     out_logits_, out_soft_ = sess.run([out_logits, out_soft], feed_dict={z_input:z2t_, labels:test_labels})
-       #     assert(out_soft_.shape == (test_batch_size, num_classes))
-       #     z2t_list.append(out_soft_)
-       # z2t_out = np.array(z2t_list)
-       # z2t_out = np.mean(z2t_out, axis=0)        
-       # assert(out_soft_.shape == (n_test, num_classes))
-
-       # pred_labels = np.argmax(z2t_out, axis=1)
-       # test_accuracy = (pred_labels == test_labels)
-       # test_accuracy = np.sum(test_accuracy)
-       # print("Test classification Accuracy:", test_accuracy)
-       # print ("Test pred labels:",pred_labels)
-       # save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
-       # print ("Model saved at: ", save_path)
-       # ######################################################################
-
+        closs = []
+        train_z2 = []
+        train_z1 = []
+        for i in range(niter_clf):
+            for j in range(n_train//batch_size):
+                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size][0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size][inp_data_dim:]})
+                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_, labels:raw_labels[j*batch_size:(j+1)*batch_size]})
+                pred_labels = np.argmax(out_soft_, axis=1)
+                train_accuracy = (pred_labels==raw_labels[j*batch_size:(j+1)*batch_size])
+                train_accuracy = np.sum(train_accuracy)/(train_accuracy.shape[0]*1.0)
+            print("epoch:%d loss:%f train_accuracy:%f"%(i, loss_, train_accuracy))
+            closs.append((loss_, train_accuracy))
+        
+        test_z2 = []
+        test_out_prob = []
+        for i in range(100):
+            z2t_ = sess.run(z2_t)
+            test_z2.append(z2t_)
+            out_logits_, out_soft_ = sess.run([out_logits, out_soft], feed_dict={z_input:z2t_,labels:test_labels})
+            test_out_prob.append(out_soft_)
+        z2t_out = np.array(test_out_prob)
+        z2t_out = np.mean(z2t_out, axis=0)
+        pred_labels = np.argmax(z2t_out, axis=1)
+        score = testy[np.arange(0,pred_labels.shape[0]),pred_labels]        
+        test_accuracy = (pred_labels==test_labels)
+        test_accuracy = np.sum(test_accuracy)/(test_accuracy.shape[0]*1.0)
+        print ("Test Classification Accuracy:", test_accuracy)
+        print ("Test ROC Score:", roc_auc_score(test_labels, score))
+        save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
+        print ("Model Saved at:", save_path)
 
     with open("/opt/data/saket/gene_data/data/y1_elu_100_100_5.pkl", "wb") as pkl_file:
     #    pkl.dump(y1_, pkl_file)
@@ -516,7 +499,7 @@ def main():
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
     # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_dim()), np.zeros(eps2.get_shape().as_dim()), True, prob)
     # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
     for i in range(0):

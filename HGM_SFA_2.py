@@ -31,8 +31,8 @@ num_classes = 2
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
 latent_dim = 40 #k
-batch_size = 200 
-test_batch_size = 3000
+batch_size = 300 
+test_batch_size = 500
 eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
@@ -44,8 +44,8 @@ cyc_z = 2
 cyc1 = 0
 include_cyc = True
 keep_prob = 1
-n_train = 7000
-n_test = 3000
+n_train = 1500
+n_test = 500
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
@@ -71,7 +71,7 @@ def load_dataset():
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
-    return raw_data[0:n_train], cov[0:n_train], labels[0:n_train], raw_data[n_train:], cov[n_train:], labels[n_train:]
+    return raw_data[0:n_train], cov[0:n_train], labels[0:n_train], raw_data[n_train:n_train+n_test], cov[n_train:n_train+n_test], labels[n_train:n_train+n_test]
 
 X_dataset, C_dataset, raw_labels, X_t, C_t, test_labels = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
@@ -168,7 +168,7 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 256, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 3, slim.fully_connected, 32, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
@@ -257,11 +257,15 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     lvars = [var for var in t_vars if var.name.startswith("Loss")]
     cvars = [var for var in t_vars if var.name.startswith("Classifier")]
     tz2vars = [var for var in t_vars if var.name.startswith("transform_z2")]
-    assert(len(t_vars) == len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
+    #assert(len(t_vars) == len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
+    print("len(t_vars)",len(t_vars))
+    print("len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars)",len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
+    print("tvars:",t_vars)
     print("evars:", evars)
     print("dvars:",dvars)
     print("lvars:",lvars)
     print("cvars:",cvars)
+    print("tz2vars:",tz2vars)
     r_loss = tf.losses.get_regularization_loss() 
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss = r_loss - r_loss_clf
@@ -381,7 +385,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
             for j in range(n_train//batch_size):
                 y1_ = sess.run(y1, feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
                 tmp.append(y1_)
-            y1_out_list.append(np.stack(tmp))
+            y1_out_list.append(np.concatenate(tmp, axis=0))
         y1_ = np.array(y1_out_list)
         #y1_ = np.mean(y1_, axis=0)
         y1_out_list = []
@@ -492,7 +496,7 @@ def main():
     z = tf.concat([z1,z2], axis=1)
     z_list = [z]
     y1_list = [y1]
-    for i in range(10):
+    for i in range(0):
         z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         # z1, z2 = graph_replace([z1,z2], {x:x,c:c})
         y1, y2, A, B, D = decoder_network(z1, z2, c, True, noise)
@@ -515,7 +519,7 @@ def main():
     z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
     # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
     z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
-    for i in range(10):
+    for i in range(0):
         z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         # z1_x_e, z2_x_e = graph_replace([z1_x_e, z2_x_e], {x:x_sample})
         z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)

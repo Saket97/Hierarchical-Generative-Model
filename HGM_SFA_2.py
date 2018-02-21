@@ -32,7 +32,7 @@ num_classes = 3
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
 latent_dim = 100 #k
-batch_size = 160
+batch_size = 40
 test_batch_size = 52
 eps2_dim = 20
 eps1_dim = 10
@@ -40,8 +40,8 @@ enc_net_hidden_dim = 512
 n_samples = batch_size
 n_epoch = 3000
 niter_clf = 25000
-cyc_x = 0.01
-cyc_z = 0.01
+cyc_x = 0.1
+cyc_z = 0.1
 cyc1 = 0
 include_cyc = True
 keep_prob = 1
@@ -49,6 +49,41 @@ n_train = 160
 n_test = 52
 # filename = "M255.pkl"
 """ Dataset """
+def normalize_each_class(X, y, c):
+    i2 = (y==2).nonzero()[0]
+    i1 = (y==1).nonzero()[0]
+    i0 = (y==0).nonzero()[0]
+    data2 = X[i2]
+    data1 = X[i1]
+    data0 = X[i0]
+    m = np.mean(data2, axis=0)
+    print ("Mean for second class:",m)
+    data2 = data2-1.0*m
+    maximum = 1e-6 + np.amax(np.abs(data2), axis=0)
+    data2 /= maximum
+    m = np.mean(data1, axis=0)
+    print ("Mean for first class:",m)
+    data1 = data1-1.0*m
+    maximum = 1e-6 + np.amax(np.abs(data1), axis=0)
+    data1 /= maximum
+    m = np.mean(data0, axis=0)
+    print ("Mean for zeroth class:",m)
+    data0 = data0-1.0*m
+    maximum = 1e-6 + np.amax(np.abs(data0), axis=0)
+    data0 /= maximum
+    data = np.concatenate((data2, data1, data0), axis=0)
+    s = data.shape[1]
+    labels = np.concatenate((y[i2],y[i1],y[i0]))
+    c = np.concatenate((c[i2],c[i1],c[i0]), axis=0)
+    sc = c.shape[1]
+    dl = np.concatenate((data,c,np.expand_dims(labels, 1)), axis=1)
+    np.random.shuffle(dl)
+    data = dl[:,0:s]
+    cov = dl[:,s:s+sc]
+    labels = dl[:,s+sc:]
+    assert(labels.shape[1]==1)
+    return data, np.squeeze(labels), cov
+
 def load_dataset():
     raw_data=np.load('/opt/data/saket/gene_data/data/mod_total_data.npy')
     #raw_data=np.load('gene_data/data/data_3k.npy')
@@ -63,12 +98,13 @@ def load_dataset():
     global inp_cov_dim
     inp_cov_dim = np.shape(cov)[1]
     print ("inp_cov_dim:", inp_cov_dim)
+    raw_data,labels, cov = normalize_each_class(raw_data, labels, cov)
     assert(np.shape(raw_data)[0] == np.shape(cov)[0])
-    raw_data_mean = np.mean(raw_data, axis=0)
-    raw_data = (raw_data-1.0*raw_data_mean)
-    print("raw min",np.min(raw_data))
-    cov_data_mean = np.mean(cov, axis=0)
-    cov_data = (cov-1.0*cov_data_mean)
+   # raw_data_mean = np.mean(raw_data, axis=0)
+   # raw_data = (raw_data-1.0*raw_data_mean)
+   # print("raw min",np.min(raw_data))
+   # cov_data_mean = np.mean(cov, axis=0)
+   # cov_data = (cov-1.0*cov_data_mean)
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
@@ -77,6 +113,21 @@ def load_dataset():
 X_dataset, C_dataset, raw_labels, X_t, C_t, test_labels = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 print("Dataset Loaded... X:", np.shape(X_dataset), " C:", np.shape(C_dataset))
+
+def load_minibatch():
+    i2 = (raw_labels==2).nonzero()[0]
+    i1 = (raw_labels==1).nonzero()[0]
+    i0 = (raw_labels==0).nonzero()[0]
+    n2 = batch_size//3
+    n1 = n2
+    n0 = batch_size-n1-n2
+    np.random.shuffle(i2)
+    np.random.shuffle(i1)
+    np.random.shuffle(i0)
+    i =  np.concatenate((i2[0:n2],i1[0:n1],i0[0:n0]))
+    np.random.shuffle(i)
+    return i
+
 
 def variable_summaries(var, name=None):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
@@ -278,7 +329,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     r_loss = tf.losses.get_regularization_loss() 
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss = r_loss - r_loss_clf
-    opt = tf.train.AdamOptimizer(1e-4)
+    opt = tf.train.AdamOptimizer(1e-5)
     train_si = opt.minimize(-si+r_loss, var_list=lvars)
     if include_cyc:
         train_t = opt.minimize(t+r_loss, var_list=dvars+tz2vars)
@@ -334,6 +385,10 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
+                indices = load_minibatch()
+                xmb = X_dataset[indices]
+                cmb = C_dataset[indices]
+                lmb = raw_labels[indices]
                 for j in range(1):
                     # try:
                     if epoch % 100 == 0 and i == 0:
@@ -409,15 +464,18 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         train_z1 = []
         for i in range(niter_clf):
             for j in range(n_train//batch_size):
-                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
+                indices = load_minibatch()
+                #z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
+                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[indices,0:inp_data_dim], c:XC_dataset[indices,inp_data_dim:]})
                 if i < 100:
                     train_z2.append(z2_)
                 if i == 0:
                     train_z1.append(z1_)
-                indices = get_indices()
-                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_[indices], labels:raw_labels[j*batch_size:(j+1)*batch_size][indices]})
+                #indices = get_indices()
+                #loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_[indices], labels:raw_labels[j*batch_size:(j+1)*batch_size][indices]})
+                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_, labels:raw_labels[indices]})
                 pred_labels = np.argmax(out_soft_, axis=1)
-                train_accuracy = (pred_labels==raw_labels[j*batch_size:(j+1)*batch_size][indices])
+                train_accuracy = (pred_labels==raw_labels[indices])
                 train_accuracy = np.sum(train_accuracy)/(train_accuracy.shape[0]*1.0)
             print("epoch:%d loss:%f train_accuracy:%f"%(i, loss_, train_accuracy))
             closs.append((loss_, train_accuracy))
@@ -522,6 +580,7 @@ def main():
     z_input = tf.placeholder(dtype = tf.float32, shape = (None, latent_dim))
     labels = tf.placeholder(dtype=tf.int64, shape=(None))
     loss, out_logits, out_soft = classifier(z_input, labels, False)
+    loss = tf.reduce_sum(loss)
     train(si, theta, phi, x, c,recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D, z_assign, z_input, labels, loss, out_logits, out_soft, prob)
 
 main()

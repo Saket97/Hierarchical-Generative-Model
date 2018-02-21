@@ -28,33 +28,33 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Parameters """
-num_classes = 2
+num_classes = 3
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
-latent_dim = 40 #k
-batch_size = 300 
-test_batch_size = 500
+latent_dim = 100 #k
+batch_size = 160
+test_batch_size = 52
 eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
 n_samples = batch_size
-n_epoch = 1000
-niter_clf = 1500
-cyc_x = 0.1
-cyc_z = 0.1
+n_epoch = 3000
+niter_clf = 25000
+cyc_x = 0.01
+cyc_z = 0.01
 cyc1 = 0
 include_cyc = True
 keep_prob = 1
-n_train = 1500
-n_test = 500
+n_train = 160
+n_test = 52
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
-    raw_data=np.load('/opt/data/saket/gene_data/data/toy/mod_total_data.npy')
+    raw_data=np.load('/opt/data/saket/gene_data/data/mod_total_data.npy')
     #raw_data=np.load('gene_data/data/data_3k.npy')
-    cov = np.load('/opt/data/saket/gene_data/data/toy/cov.npy')
+    cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
     print ("cov:", cov)
-    labels = np.load('/opt/data/saket/gene_data/data/toy/data_label.npy')
+    labels = np.load('/opt/data/saket/gene_data/data/data_label.npy')
     #cov = np.load('gene_data/data/cov1.npy')
     #raw_data = np.log10(raw_data+0.1)
     cov = np.log10(cov+0.1)
@@ -68,7 +68,7 @@ def load_dataset():
     raw_data = (raw_data-1.0*raw_data_mean)
     print("raw min",np.min(raw_data))
     cov_data_mean = np.mean(cov, axis=0)
-    #cov_data = (cov-1.0*cov_data_mean)
+    cov_data = (cov-1.0*cov_data_mean)
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
@@ -169,7 +169,7 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 2, slim.fully_connected, 64, activation_fn=tf.nn.relu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 3, slim.fully_connected, 64, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
@@ -233,6 +233,9 @@ def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
 
 def classifier(z_input, labels, reuse):
     with tf.variable_scope("Classifier", reuse = reuse):
+        m,v = tf.nn.moments(z_input, [0])
+        z_input = tf.truediv((z_input-1.0*m), tf.sqrt(v))
+        z_input = tf.truediv(z_input-tf.reduce_min(z_input), tf.reduce_max(z_input)-tf.reduce_min(z_input))
         out_logits = tf.layers.dense(z_input, num_classes, use_bias=False, kernel_initializer=tf.truncated_normal_initializer, kernel_regularizer=slim.l2_regularizer(0.1))
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=out_logits, labels=labels)
         #variable_summaries(loss, name="softmax_loss")
@@ -391,7 +394,7 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         noise = standard_normal([test_batch_size, inp_data_dim], name="test_noise") * 1.0 # (batch_size, eps_dim)
         z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         y1_t, y2_t, _ , _ , _ = decoder_network(z1_t, z2_t, C_t, True, noise)
-        for i in range(100):
+        for i in range(250):
             y1t_ = sess.run(y1_t)
             y1_out_list.append(y1t_)
         y1_t_ = np.array(y1_out_list)
@@ -407,16 +410,21 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         for i in range(niter_clf):
             for j in range(n_train//batch_size):
                 z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
-                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_, labels:raw_labels[j*batch_size:(j+1)*batch_size]})
+                if i < 100:
+                    train_z2.append(z2_)
+                if i == 0:
+                    train_z1.append(z1_)
+                indices = get_indices()
+                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_[indices], labels:raw_labels[j*batch_size:(j+1)*batch_size][indices]})
                 pred_labels = np.argmax(out_soft_, axis=1)
-                train_accuracy = (pred_labels==raw_labels[j*batch_size:(j+1)*batch_size])
+                train_accuracy = (pred_labels==raw_labels[j*batch_size:(j+1)*batch_size][indices])
                 train_accuracy = np.sum(train_accuracy)/(train_accuracy.shape[0]*1.0)
             print("epoch:%d loss:%f train_accuracy:%f"%(i, loss_, train_accuracy))
             closs.append((loss_, train_accuracy))
         
         test_z2 = []
         test_out_prob = []
-        for i in range(100):
+        for i in range(250):
             z2t_ = sess.run(z2_t)
             test_z2.append(z2t_)
             out_logits_, out_soft_ = sess.run([out_logits, out_soft], feed_dict={z_input:z2t_,labels:test_labels})
@@ -426,9 +434,10 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         pred_labels = np.argmax(z2t_out, axis=1)
         score = z2t_out[np.arange(0,pred_labels.shape[0]),pred_labels]        
         test_accuracy = (pred_labels==test_labels)
+        print("Test Classification Number:", np.sum(test_accuracy))
         test_accuracy = np.sum(test_accuracy)/(test_accuracy.shape[0]*1.0)
         print ("Test Classification Accuracy:", test_accuracy)
-        print ("Test ROC Score:", roc_auc_score(test_labels, score))
+        #print ("Test ROC Score:", roc_auc_score(test_labels, score))
         save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
         print ("Model Saved at:", save_path)
         A_, B_, D_ = sess.run([A,B,D])
@@ -439,6 +448,8 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         np.save("/opt/data/saket/gene_data/data/y1t.npy", y1_t_)
         #np.save("/opt/data/saket/gene_data/data/train_z2.npy", train_z2)
         np.save("/opt/data/saket/gene_data/data/test_z2.npy", test_z2)
+        np.save("/opt/data/saket/gene_data/data/train_z2.npy",train_z2)
+        np.save("/opt/data/saket/gene_data/data/train_z1.npy",train_z1)
         #np.save("/opt/data/saket/gene_data/data/train_z1.npy", train_z1)
         np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
         np.save("/opt/data/saket/gene_data/data/D_elu_100_100_5.npy", D_)

@@ -17,7 +17,7 @@ test_batch_size = 52
 ntest=52
 inp_data_dim = 5000
 inp_cov_dim = 7
-L = 5 # Number of samples of z2 drawn from the posterior
+L = 10 # Number of samples of z2 drawn from the posterior
 
 def load_dataset():
     raw_data = np.load("/opt/data/saket/gene_data/data/mod_total_data.npy")
@@ -80,8 +80,8 @@ def cal_loss(r_sample, z_list):
         f1 = tf.reduce_mean(g_z, axis=0)
 
         f2 = (z_prior*x_prob)/(1e-12 + 1.0*z_prob)
-        f2 = tf.log(f2)
-        f2 = tf.reduce_mean(f2, axis=0)
+        f2 = tf.log(f2+1e-6)
+        f2 = tf.reduce_mean(f2,axis=0)
         f2 = tf.reduce_mean(f2,axis=0)
 
         vtp = f1+f2
@@ -171,13 +171,16 @@ if __name__ == "__main__":
     eps = standard_normal((batch_size, inp_data_dim))
     z = encoder(x,c,eps,reuse=False)
     z_list = [z]
-    z_prob_list = [R.prob(z)]
+    t = R.prob(z)
+    print("prob z shape:",t.get_shape().as_list())
+    z_prob_list = [t]
     for i in range(L-1):
         z = encoder(x,c, eps, reuse=True)
         z_list.append(z)
         z_prob_list.append(R.prob(z))
     z_prob = tf.stack(z_prob_list, axis=0) #(L,N)
     z_prob = tf.transpose(z_prob, [1,0]) # (N,L)
+    print ("z_prob shape:",z_prob.get_shape().as_list())
 
     """ Define the prior on z2 and evaluate it on posterior """
     print("Defining prior...")
@@ -187,6 +190,7 @@ if __name__ == "__main__":
         z_list_prior_prob.append(z_prior_ds.prob(z_list[i]))
     z_prior = tf.stack(z_list_prior_prob, axis=0)
     z_prior = tf.transpose(z_prior, [1,0]) # (N,L)
+    print("z_prior shape:",z_prior.get_shape().as_list())
 
     """ Define the distribution p(x|z2) and sample from it """
     print("Defining p(x|z2")
@@ -197,6 +201,7 @@ if __name__ == "__main__":
     x_ = tf.ones((L,batch_size,inp_data_dim))*x
     x_prob = post.prob(x_)
     x_prob = tf.transpose(x_prob, [1,0]) #(N,L)
+    print("x_prob shape:",x_prob.get_shape().as_list())
 
     si, vtp = cal_loss(r_sample, z_list)
     train(z)

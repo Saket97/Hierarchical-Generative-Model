@@ -28,8 +28,8 @@ def load_dataset():
     inp_data_dim = raw_data.shape[1]
     inp_cov_dim = cov.shape[1]
     m = np.mean(raw_data, axis=0)
-    raw_data = raw_data-m
-    cov = np.log10(cov+0.1)
+    raw_data = (raw_data-m)/5.0
+    cov = (np.log10(cov+0.1))/5.0
     return raw_data[0:ntrain],cov[0:ntrain],labels[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels[ntrain:]
 
 X_train, C_train, L_train, X_test, C_test, L_test = load_dataset()
@@ -92,20 +92,31 @@ def encoder(x,c, eps=None, n_layer=2, n_hidden=256, reuse=False):
 
     return z,Ez,Varz
 
+def classifier(x_input,labels, reuse=False):
+    with tf.variable_scope("Classifier", reuse=reuse):
+        logits = slim.fully_connected(x_input, 3, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+    return logits, tf.reduce_mean(cl_loss)
+
 def train(z):
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
-    tp_var = [var for var in t_vars if var not in d_vars]
+    c_vars = [var for var in t_vars if var.name.startswith("Classifier")]
+    tp_var = [var for var in t_vars if var not in d_vars+c_vars]
     assert(len(tp_var)+len(d_vars) == len(t_vars))
     assert(len(tp_var)>3)
     r_loss = tf.losses.get_regularization_loss()
+    r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
+    r_loss -= r_loss_clf
     primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
+    classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
     primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
     adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
-
+    clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
+    
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     si_list = []
@@ -124,15 +135,22 @@ def train(z):
 
     # Training complete
     z_list=[]
-    for i in range(20):
+    clf_loss_list = []
+    for i in range(n_clf_epoch):
         tmp = []
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             cmb = C_train[j*batch_size:(j+1)*batch_size]
-            z_ = sess.run(z, feed_dict={x:xmb,c:cmb})
+            sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
+            # z_ = sess.run(z, feed_dict={x:xmb,c:cmb})
+            cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+
             tmp.append(z_)
+        if i%100 == 0:
+            print("epoch:",i," closs:",cl_loss_," train_acc:",label_acc_)
         train_z = np.stack(tmp, axis=0)
         z_list.append(train_z)
+        clf_loss_list.append((cl_loss_, label_acc_))
     
     np.save("si_loss.npy", si_list)
     np.save("vtp_loss.npy", vtp_list)
@@ -142,6 +160,11 @@ def train(z):
     z_list = []
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z, _, _ = encoder(X_test,C_test,eps,reuse=True)
+    logits, closs = classifier(z,labels,reuse=True)
+    correct_label_pred = tf.equal(tf.argmax(logits,1),labels)
+    label_acc = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))        
+    label_acc_ = sess.run(label_acc, feed_dict={labels:L_test})
+    print("Test Set label Accuracy:", label_acc_)
     z_list = [z]
     for i in range(20):
         z_ = sess.run(z)
@@ -152,6 +175,7 @@ if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     z_sampled = tf.random_normal([batch_size, latent_dim])
+    labels = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
 
     with tf.variable_scope("Decoder"):
@@ -196,6 +220,11 @@ if __name__ == "__main__":
     t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec))
     t3 = -latent_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log = t1+t2+t3
+
+    # Classifier
+    logits, closs = classifier(z,labels,reuse=False)
+    correct_label_pred = tf.equal(tf.argmax(logits,1),labels)
+    label_acc = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
     
     # Dual loss
     Td = data_network(z_sampled)

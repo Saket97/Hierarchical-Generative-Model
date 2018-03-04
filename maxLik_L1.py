@@ -10,7 +10,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=100
-nepoch = 1500
+nepoch = 20000
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -33,6 +33,8 @@ def load_dataset():
     return raw_data[0:ntrain],cov[0:ntrain],labels[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels[ntrain:]
 
 X_train, C_train, L_train, X_test, C_test, L_test = load_dataset()
+X_test = X_test.astype(np.float32)
+C_test = C_test.astype(np.float32)
 
 def get_zlogprob(z, z_dist):
     if z_dist == "gauss":
@@ -53,6 +55,7 @@ def data_network(z, n_layer=2, n_hidden=256, reuse=False):
     with tf.variable_scope("data_net", reuse = reuse):
         h = slim.repeat(z, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.relu, weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h, 1, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+    #out = tf.Print(out, [out], message="data_net_out")
     return tf.squeeze(out)
 
 def encoder(x,c, eps=None, n_layer=2, n_hidden=256, reuse=False):
@@ -112,7 +115,7 @@ def train(z):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             cmb = C_train[j*batch_size:(j+1)*batch_size]
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
-            sess.run(train_op, feed_dict{x:xmb,c:cmb})
+            sess.run(train_op, feed_dict={x:xmb,c:cmb})
             si_loss,vtp_loss = sess.run([dual_loss, primal_loss], feed_dict={x:xmb,c:cmb})
             si_list.append(si_loss)
             vtp_list.append(vtp_loss)
@@ -138,7 +141,7 @@ def train(z):
     # Test Set
     z_list = []
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
-    z = encoder(X_test,C_test,eps,reuse=True)
+    z, _, _ = encoder(X_test,C_test,eps,reuse=True)
     z_list = [z]
     for i in range(20):
         z_ = sess.run(z)
@@ -190,15 +193,19 @@ if __name__ == "__main__":
     t = (x-means)
     t1 = t*prec*t
     t1 = -0.5*tf.reduce_sum(t1, axis=1)
-    t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec), axis=1)
+    t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec))
     t3 = -latent_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log = t1+t2+t3
     
     # Dual loss
     Td = data_network(z_sampled)
     Ti = data_network(z_norm, reuse=True)
+    Td = tf.Print(Td,[Td],message="Td")
+    Ti = tf.Print(Ti,[Ti],message="Ti")
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Td, labels=tf.ones_like(Td)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Ti, labels=tf.zeros_like(Ti)))
+    d_loss_d = tf.Print(d_loss_d, [d_loss_d], message="d_loss_d")
+    d_loss_i = tf.Print(d_loss_i, [d_loss_i], message="d_loss_i")
     dual_loss = d_loss_d+d_loss_i
 
     # Primal loss

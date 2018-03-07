@@ -49,62 +49,23 @@ n_train = 160
 n_test = 52
 # filename = "M255.pkl"
 """ Dataset """
-def normalize_each_class(X, y, c):
-    i2 = (y==2).nonzero()[0]
-    i1 = (y==1).nonzero()[0]
-    i0 = (y==0).nonzero()[0]
-    data2 = X[i2]
-    data1 = X[i1]
-    data0 = X[i0]
-    m = np.mean(data2, axis=0)
-    print ("Mean for second class:",m)
-    data2 = data2-1.0*m
-    maximum = 1e-6 + np.amax(np.abs(data2), axis=0)
-    data2 /= maximum
-    m = np.mean(data1, axis=0)
-    print ("Mean for first class:",m)
-    data1 = data1-1.0*m
-    maximum = 1e-6 + np.amax(np.abs(data1), axis=0)
-    data1 /= maximum
-    m = np.mean(data0, axis=0)
-    print ("Mean for zeroth class:",m)
-    data0 = data0-1.0*m
-    maximum = 1e-6 + np.amax(np.abs(data0), axis=0)
-    data0 /= maximum
-    data = np.concatenate((data2, data1, data0), axis=0)
-    s = data.shape[1]
-    labels = np.concatenate((y[i2],y[i1],y[i0]))
-    c = np.concatenate((c[i2],c[i1],c[i0]), axis=0)
-    sc = c.shape[1]
-    dl = np.concatenate((data,c,np.expand_dims(labels, 1)), axis=1)
-    np.random.shuffle(dl)
-    data = dl[:,0:s]
-    cov = dl[:,s:s+sc]
-    labels = dl[:,s+sc:]
-    assert(labels.shape[1]==1)
-    return data, np.squeeze(labels), cov
-
 def load_dataset():
     raw_data=np.load('/opt/data/saket/gene_data/data/mod_total_data.npy')
-    #raw_data=np.load('gene_data/data/data_3k.npy')
     cov = np.load('/opt/data/saket/gene_data/data/cov.npy')
-    print ("cov:", cov)
     labels = np.load('/opt/data/saket/gene_data/data/data_label.npy')
-    #cov = np.load('gene_data/data/cov1.npy')
-    #raw_data = np.log10(raw_data+0.1)
     cov = np.log10(cov+0.1)
     global inp_data_dim
     inp_data_dim = np.shape(raw_data)[1]
     global inp_cov_dim
     inp_cov_dim = np.shape(cov)[1]
     print ("inp_cov_dim:", inp_cov_dim)
-    raw_data,labels, cov = normalize_each_class(raw_data, labels, cov)
+    # raw_data,labels, cov = normalize_each_class(raw_data, labels, cov)
     assert(np.shape(raw_data)[0] == np.shape(cov)[0])
-   # raw_data_mean = np.mean(raw_data, axis=0)
-   # raw_data = (raw_data-1.0*raw_data_mean)
+    raw_data_mean = np.mean(raw_data, axis=0)
+    raw_data = (raw_data-1.0*raw_data_mean)
    # print("raw min",np.min(raw_data))
-   # cov_data_mean = np.mean(cov, axis=0)
-   # cov_data = (cov-1.0*cov_data_mean)
+    cov_data_mean = np.mean(cov, axis=0)
+    cov_data = (cov-1.0*cov_data_mean)
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
@@ -140,24 +101,49 @@ def variable_summaries(var, name=None):
         tf.summary.scalar('%s max'%name, tf.reduce_max(var))
         tf.summary.scalar('%s min'%name, tf.reduce_min(var))
         tf.summary.histogram('%s histogram'%name, var)
+
 """ Networks """
 def standard_normal(shape, **kwargs):
     """Create a standard Normal StochasticTensor."""
     return tf.cast(st.StochasticTensor(
         ds.MultivariateNormalDiag(tf.zeros(shape), tf.ones(shape), **kwargs)),  tf.float32)
 
+def add_linear(inputs, targets, activation_fn=None, scope=None,reuse=False):
+    """ Ma the input to the target space and do element-wise addition """
+    with tf.variable_scope(scope, reuse=reuse):
+        t = targets.get_shape().as_list()[1]
+        output = slim.fully_connected(inputs, t, activation_fn=None)
+        output += targets
+    if activation_fn is not None:
+        output = activation_fn(output)
+    return output
+
+def lrelu(x, leak=0.2, name="lrelu"):
+    """ Leaky relu activation function """
+    return tf.maximum(x, leak*x)
+
 def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse, prob):
     with tf.variable_scope("encoder", reuse = reuse):
+        h = tf.concat([x, c], 1)
+        for i in range(n_layer):
+            h = slim.fully_connected(h,latent_dim,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
+            if reuse==False and i == 0:
+                h = add_linear(eps1, h, activation_fn=tf.nn.elu,scope="encoder_z1",reuse=False)
+            else:
+                h = add_linear(eps1, h, activation_fn=tf.nn.elu,scope="encoder_z1",reuse=True)
+        
+        z1 = slim.fully_connected(h, z1_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        # z1 = tf.nn.dropout(z1, prob)
 
-        h = tf.concat([x, c, eps1], 1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer(), weights_regularizer = slim.l2_regularizer(0.1))
-        variable_summaries(h, name="enc_z1_hidden_layer_output")
-        z1 = slim.fully_connected(h, z1_dim, activation_fn=tf.tanh, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
-        z1 = tf.nn.dropout(z1, prob)
-
-        h = tf.concat([x, c, z1, eps2], axis=1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, latent_dim, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
-        variable_summaries(h, name="enc_z2_hidden_layer_output")
+        h = tf.concat([x, c], axis=1)
+        h = add_linear(z1, h, activation_fn=tf.nn.elu, scope="z1_skip", reuse=False)
+        for i in range(n_layer):
+            h = slim.fully_connected(h, latent_dim, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
+            if reuse==False and i == 0:
+                h = add_linear(eps2, h, activation_fn=tf.nn.elu, scope="encoder_z2",reuse=False)
+            else:
+                h = add_linear(eps2, h, activation_fn=tf.nn.elu, scope="encoder_z2",reuse=True)
+                
         z2 = slim.fully_connected(h, z2_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
         
         #z1 = tf.Print(z1, [z1], message="z1")
@@ -208,19 +194,30 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
     #x = tf.Print(x, [x], message="x data network")
     #z = tf.Print(z, [z], message="z data network")
     with tf.variable_scope("data_network", reuse = reuse):
-        h = tf.concat([x,z], axis=1)
-        #variable_summaries(h)
-        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
-        variable_summaries(h, name="data_network_hidden")
-        h = slim.fully_connected(h, 1, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
-        variable_summaries(h, name="data_net_output")
-        #h = tf.Print(h,[h],message="h data_network")
-        # variable_summaries(h)
-    return h
+        z1 = tf.slice(z,[0,0],[-1,inp_data_dim])
+        z2 = tf.slice(z,[0,inp_data_dim],[-1,-1])
+        # h = tf.concat([x,z], axis=1)
+        with tf.variable_scope("x_embed", reuse=reuse):
+            h = slim.repeat(x,1,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+            x_embed = slim.fully_connected(h,256,activation_fn=None)
+
+        with tf.variable_scope("z1_embed", reuse=reuse):
+            h = slim.repeat(z1, 1, slim.fully_connected, n_hidden, activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+            z1_embed = slim.fully_connected(h,256,activation_fn=None)
+        
+        with tf.variable_scope("z2_embed", reuse=reuse):
+            h = slim.repeat(z2, 1, slim.fully_connected, n_hidden,activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.1))
+            z2_embed = slim.fully_connected(h,256,activation_fn=None)
+        h = add_linear(z1_embed,x_embed,activation_fn=lrelu,scope="data_net_z1",reuse=False)
+        h = add_linear(z2_embed,h,activation_fn=lrelu,scope="data_net_z2",reuse=False)
+               
+        h = slim.repeat(h,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        out = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return out
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 64, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     return h
 

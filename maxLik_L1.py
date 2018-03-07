@@ -140,7 +140,7 @@ def train(z, closs):
    
     saver = tf.train.Saver()
     sess = tf.Session()
-    #saver.restore(sess,"/opt/data/saket/model-54000")
+    #saver.restore(sess,"/opt/data/saket/model.ckpt-54000")
     sess.run(tf.global_variables_initializer())
     si_list = []
     vtp_list = []
@@ -183,22 +183,39 @@ def train(z, closs):
             z_list.append(train_z)
         clf_loss_list.append((cl_loss_, label_acc_))
     
-    np.save("si_loss.npy", si_list)
-    np.save("vtp_loss.npy", vtp_list)
-    np.save("x_post_list.npy",post_test_list)
-    np.save("z_train_list.npy",z_list)
-    np.save("A.npy",A)
-    np.save("B.npy",B)
-    np.save("delta_inv.npy",DELTA_inv)
+    A_,B_,DELTA_inv_ = sess.run([A,B,DELTA_inv])
+    np.save("si_loss1.npy", si_list)
+    np.save("vtp_loss1.npy", vtp_list)
+    np.save("x_post_list1.npy",post_test_list)
+    np.save("z_train_list1.npy",z_list)
+    np.save("A1.npy",A_)
+    np.save("B1.npy",B_)
+    np.save("delta_inv1.npy",DELTA_inv_)
+    np.save("clf_loss_list1.npy",clf_loss_list)
 
     # Test Set
     z_list = []
     logits_test, closs_test = classifier(z_test,labels,reuse=True)
+    prob_test = tf.nn.softmax(logits_test)
     correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
     label_acc_test = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))        
     label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})
     print("Test Set label Accuracy:", label_acc_)
     z_list = []
+    test_prob = []
+    test_acc = []
+    for  i in range(250):
+        lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})
+        test_prob.append(lt)
+        test_acc.append(la)
+    avg_test_prob = np.mean(test_prob,axis=0)
+    print("avg_test_prob_shape:",avg_test_prob.shape)
+    avg_test_acc1 = np.mean((np.argmax(avg_test_prob,axis=1)==L_test))
+    avg_test_acc = np.mean(test_acc)
+    np.save("test_acc.npy",test_acc)
+    np.save("test_prob.npy",test_prob)
+    print("Average Test Set Accuracy:",avg_test_acc, " :",avg_test_acc1)
+
     for i in range(20):
         z_ = sess.run(z_test)
         #print("z_:",z_)

@@ -233,17 +233,6 @@ def classifier(x_input,labels, reuse=False):
         cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     return logits, tf.reduce_mean(cl_loss)
 
-def get_indices():
-    i2 = (raw_labels==2).nonzero()[0]
-    i1 = (raw_labels==1).nonzero()[0]
-    i0 = (raw_labels==0).nonzero()[0]
-    a = np.amin([i2.shape[0],i1.shape[0],i0.shape[0]])
-    np.random.shuffle(i2) 
-    np.random.shuffle(i1) 
-    np.random.shuffle(i0)
-    r = np.concatenate((i2[0:a],i1[0:a], i0[0:a]))
-    np.random.shuffle(r)
-    return r 
 
 def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
 
@@ -365,7 +354,7 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
     np.save("test_acc.npy",test_acc)
     np.save("test_prob.npy",test_prob)
 
-def main():
+if __name__ == "__main__":
     tf.reset_default_graph()
 
     prob = tf.placeholder_with_default(1.0, shape=())
@@ -408,5 +397,3 @@ def main():
     label_acc = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
     train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs)
-
-main()

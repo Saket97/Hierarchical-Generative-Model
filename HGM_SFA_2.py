@@ -32,18 +32,14 @@ num_classes = 3
 inp_data_dim = 10 #d
 inp_cov_dim = 10 #d'
 latent_dim = 100 #k
-batch_size = 40
+batch_size = 160
 test_batch_size = 52
 eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
 n_samples = batch_size
-n_epoch = 3000
-niter_clf = 25000
-cyc_x = 0.1
-cyc_z = 0.1
-cyc1 = 0
-include_cyc = True
+n_epoch = 55000
+n_clf_epoch = 5000
 keep_prob = 1
 n_train = 160
 n_test = 52
@@ -74,21 +70,6 @@ def load_dataset():
 X_dataset, C_dataset, raw_labels, X_t, C_t, test_labels = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 print("Dataset Loaded... X:", np.shape(X_dataset), " C:", np.shape(C_dataset))
-
-def load_minibatch():
-    i2 = (raw_labels==2).nonzero()[0]
-    i1 = (raw_labels==1).nonzero()[0]
-    i0 = (raw_labels==0).nonzero()[0]
-    n2 = batch_size//3
-    n1 = n2
-    n0 = batch_size-n1-n2
-    np.random.shuffle(i2)
-    np.random.shuffle(i1)
-    np.random.shuffle(i0)
-    i =  np.concatenate((i2[0:n2],i1[0:n1],i0[0:n0]))
-    np.random.shuffle(i)
-    return i
-
 
 def variable_summaries(var, name=None):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
@@ -183,7 +164,7 @@ def decoder_network(z1, z2, c, reuse, noise):
         #y1 = tf.Print(y1, [y1], message="y1")        
     return y1, y2, A, B, DELTA
 
-def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
+def adversary(x, z, n_layer=2, n_hidden=1024, reuse=False):
     """ The network to approximate the function g_si(x,z) whose optimal value will give w(x,z)
     Arguments:
         x: Data matrix of dimension (batch_size, inp_data_dim)
@@ -217,82 +198,40 @@ def data_network(x, z, n_layer=2, n_hidden=1024, reuse=False):
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=tf.nn.elu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list):
+def cal_loss(x, z, y1, x_sample, z_sample, z_e):
     with tf.variable_scope("Loss"):
-        g_x_z1 = data_network(x, z_list[0])
-        g_x_z_list = [g_x_z1]
-        g_x_z_log_list = [g_x_z1 - tf.nn.softplus(g_x_z1)]
-        for i in range(1,len(z_list)):
-            g_x_z1 = data_network(x,z_list[i],reuse=True)
-            # g_x_z1 = graph_replace(g_x_z1, {z_list[i-1]:z_list[i]})
-            g_x_z_list.append(g_x_z1)
-            g_x_z_log_list.append(g_x_z1 - tf.nn.softplus(g_x_z1))
-        g_x_z = -tf.truediv(tf.add_n(g_x_z_list),len(g_x_z_list)*1.0)
+        Td = adversary(x,z,reuse=False)
+        Ti = adversary(x_sample,z_sample,reuse=True)
 
-        g_x_z_s = data_network(x_sample, z_sample, reuse=True)
-        # g_x_z_s = graph_replace(g_x_z1, {x:x_sample, z_list[0]:z_sample})
+        #Adversary Accuracy
+        correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
+        label_acc_adv = correct_labels_adv/(2.0*batch_size)
         
-        with tf.name_scope("Si_maximise"):
-            tmp = tf.add_n(g_x_z_log_list)/(len(g_x_z_log_list)*1.0)
-            f1 = tf.reduce_sum(tmp)/(tmp.get_shape().as_list()[0]*1.0)
-            f2 = -tf.nn.softplus(g_x_z_s)
-            f2 = tf.reduce_sum(f2)/(f2.get_shape().as_list()[0]*1.0)
-            si = f1+f2 # maximize this quantity
-            #si = tf.Print(si, [si], message="Si")
+        # Dual Loss
+        d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Td, labels=tf.ones_like(Td)))
+        d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Ti, labels=tf.zeros_like(Ti)))
+        dual_loss = d_loss_d+d_loss_i
 
-        with tf.name_scope("phi"):
-            g_x_z = tf.add_n(g_x_z_list)/(len(g_x_z_list)*1.0)
-            p = tf.reduce_sum(g_x_z)/(g_x_z.get_shape().as_list()[0]*1.0)
-            #p = tf.Print(p,[p],message="Phi without cyclic consistency")
-            # Adding cyclic consistency
-            if include_cyc:
-                norm_list = []
-                norm_inv_list = []
-                for i in range(len(y1_list)):
-                    norm = tf.norm(x-y1_list[i], axis=1)
-                    norm_list.append(norm)
-                    norm_inv_list.append(tf.norm(y1_list[i], axis=1))
-                norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
-                norm_inv = tf.add_n(norm_inv_list)/(len(norm_inv_list)*1.0)
-                norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
-                #norm = tf.Print(norm, [norm], message="phi_norm")
-                norm_inv = tf.reduce_sum(norm_inv)/(norm_inv.get_shape().as_list()[0]*1.0)
-                p = p+cyc_x*norm+cyc1/norm_inv
+        # Primal Loss
+        recon_loss_x_z_x = tf.reduce_mean(tf.norm(x-y1, axis=1))
+        recon_loss_z_x_z = tf.reduce_mean(tf.norm(z-z_e, axis=1))
+        phi = tf.reduce_mean(Td,axis=0)
+        theta = -tf.reduce_mean(Ti,axis=0)
+        kls = phi+theta
+        primal_enc_loss = phi+cyc*recon_loss_x_z_x
+        primal_dec_loss = theta+cyc*recon_loss_z_x_z
 
-        with tf.name_scope("theta"):
-            t = tf.reduce_sum(g_x_z_s)/(g_x_z_s.get_shape().as_list()[0]*1.0)
-            t = -t
-            #t = tf.Print(t,[t], message="Theta without cyclic consistency")
-            if include_cyc:
-                norm_list = []
-                for i in range(len(z_x_sample_encoded_list)):
-                    norm = tf.norm(z_sample-z_x_sample_encoded_list[i], axis=1)
-                    norm_list.append(norm)
-                norm = tf.add_n(norm_list)/(len(norm_list)*1.0)
-                norm = tf.reduce_sum(norm)/(norm.get_shape().as_list()[0]*1.0)
-                #norm = tf.Print(norm, [norm], message="theta_norm")
-                t = t+cyc_z*norm
-            
-    return si, t, p
+    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv
 
-def classifier(z_input, labels, reuse):
-    with tf.variable_scope("Classifier", reuse = reuse):
-        m,v = tf.nn.moments(z_input, [0])
-        z_input = tf.truediv((z_input-1.0*m), tf.sqrt(v))
-        z_input = tf.truediv(z_input-tf.reduce_min(z_input), tf.reduce_max(z_input)-tf.reduce_min(z_input))
-        out_logits = tf.layers.dense(z_input, num_classes, use_bias=False, kernel_initializer=tf.truncated_normal_initializer, kernel_regularizer=slim.l2_regularizer(0.1))
-        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=out_logits, labels=labels)
-        #variable_summaries(loss, name="softmax_loss")
-        loss = tf.Print(loss, [loss], message="softmax loss")
-        loss = tf.reduce_mean(loss)
-        weights = tf.get_default_graph().get_tensor_by_name("Classifier/dense"+"/kernel:0")
-        #variable_summaries(weights, name="Classifier_weights")
-       # loss = tf.Print(loss, [loss], message="loss mean")
-        return loss, out_logits, tf.nn.softmax(out_logits)
+def classifier(x_input,labels, reuse=False):
+    with tf.variable_scope("Classifier", reuse=reuse):
+        logits = slim.fully_connected(x_input, 3, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+    return logits, tf.reduce_mean(cl_loss)
 
 def get_indices():
     i2 = (raw_labels==2).nonzero()[0]
@@ -306,7 +245,7 @@ def get_indices():
     np.random.shuffle(r)
     return r 
 
-def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D, z_assign, z_input, labels, loss, out_logits, out_soft, prob):
+def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
 
     t_vars = tf.trainable_variables()
     evars = [var for var in t_vars if var.name.startswith("encoder")]
@@ -314,47 +253,27 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     lvars = [var for var in t_vars if var.name.startswith("Loss")]
     cvars = [var for var in t_vars if var.name.startswith("Classifier")]
     tz2vars = [var for var in t_vars if var.name.startswith("transform_z2")]
-    #assert(len(t_vars) == len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
-    # print("len(t_vars)",len(t_vars))
-    # print("len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars)",len(evars)+len(dvars)+len(lvars)+len(cvars)+len(tz2vars))
-    # print("tvars:",t_vars)
-    # print("evars:", evars)
-    # print("dvars:",dvars)
-    # print("lvars:",lvars)
-    # print("cvars:",cvars)
-    # print("tz2vars:",tz2vars)
+
+    # Regularisation Loss
     r_loss = tf.losses.get_regularization_loss() 
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
-    r_loss = r_loss - r_loss_clf
-    opt = tf.train.AdamOptimizer(1e-5)
-    train_si = opt.minimize(-si+r_loss, var_list=lvars)
-    if include_cyc:
-        train_t = opt.minimize(t+r_loss, var_list=dvars+tz2vars)
-        train_p = opt.minimize(p+r_loss, var_list=evars+tz2vars)
-    else:
-        tp = t+p+r_loss
-        train_tp = opt.minimize(t+p+r_loss, var_list = dvars+evars+tz2vars)
+    r_loss_adv = tf.losses.get_regularization_loss(scope="Loss")
+    r_loss = r_loss - r_loss_clf - r_loss_adv
 
-    train_clf = opt.minimize(loss+r_loss_clf, var_list=cvars)
+    # Optimiser definition
+    primal_dec_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    primal_enc_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    dual_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    classifier_opt = tf.train.AdamOptimizer(learning_rate=1e-4)
+    primal_dec_op = primal_dec_opt.minimize(primal_dec_loss+r_loss, var_list=dvars+tz2vars)
+    primal_enc_op = primal_enc_opt.minimize(primal_enc_loss+r_loss, var_list=evars)
+    dual_op = dual_opt.minimize(dual_loss+r_loss_adv, var_list=lvars)
+    train_op = tf.group(primal_dec_op,primal_enc_op,dual_op)
+    clf_train_op = classifier_opt.minimize(closs+r_loss_clf, var_list=cvars)
 
     merged = tf.summary.merge_all()
-    s_loss = []
-    t_loss_list = []
-    p_loss_list = []
-    re_loss = []
-    re_abs = []
-    re_std = []
-    acc = []
-    acc_abs = []
-    acc_std = []
     train_writer = tf.summary.FileWriter(FLAGS.logdir, graph = tf.get_default_graph())
-    config = projector.ProjectorConfig()
-    
-    embedding = config.embeddings.add()
-    embedding_var = tf.Variable(initial_value = np.zeros((z1.shape), dtype=np.float32), name="z1_embed_var")
-    assign_z1 = tf.assign(embedding_var, z1)
-    embedding.tensor_name = embedding_var.name
-    projector.visualize_embeddings(train_writer, config)        
+    config = projector.ProjectorConfig()  
    
     embedding_var = tf.Variable(initial_value = np.zeros((z2.shape), dtype=np.float32), name="z2_embed_var") 
     assign_z2 = tf.assign(embedding_var, z2)
@@ -362,11 +281,8 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
     embedding.tensor_name = embedding_var.name
     projector.visualize_embeddings(train_writer, config)        
     
-   # embedding = config.embeddings.add()
-   # embedding.tensor_name = x.name 
-   # projector.visualize_embeddings(train_writer, config)        
-    #weights = tf.get_variable("decoder/dense/kernel:0")
-    #print(tf.trainable_variables())
+    dloss_list = []
+    ploss_list = []
     with tf.Session() as sess:
 
         sess.run(tf.global_variables_initializer(), feed_dict={x:XC_dataset[0:batch_size,0:inp_data_dim], c:XC_dataset[0:batch_size,inp_data_dim:]})
@@ -374,7 +290,6 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
         # sess.run(z_assign, feed_dict={x:XC_dataset[:,0:inp_data_dim], c:XC_dataset[:,inp_data_dim:]})
         #saver.restore(sess, os.path.join("/opt/data/saket/model_2gg00_100_5/", "model.ckpt-4000"))
         for epoch in range(n_epoch):
-            #np.random.shuffle(XC_dataset)
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
             sess.run(z_assign, feed_dict={x:XC_dataset[0:batch_size,0:inp_data_dim], c:XC_dataset[0:batch_size,inp_data_dim:], prob:keep_prob})
@@ -382,140 +297,73 @@ def train(si, t, p, x, c, recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D,
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
-                indices = load_minibatch()
-                xmb = X_dataset[indices]
-                cmb = C_dataset[indices]
-                lmb = raw_labels[indices]
-                for j in range(1):
-                    # try:
-                    if epoch % 100 == 0 and i == 0:
-                        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                        run_metadata = tf.RunMetadata()
-                        summary, si_loss, _ , _ , _ = sess.run([merged, si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
-                        train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+j))
-                        train_writer.add_summary(summary, epoch*6+j)
-                    else:                    
-                        si_loss, _ , _ , _ = sess.run([si, train_si, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                    s_loss.append(si_loss)
-                    # except:
-                        # train_writer.close()
-                
-                for j in range(1):
-                    #try:
-                    if epoch % 100 == 0 and i == 0:
-                        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                        run_metadata = tf.RunMetadata()
-                        if include_cyc:
-                            summary, t_loss, _ , _ , _  = sess.run([merged, t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
-                            summary, p_loss, _ , _ , _  = sess.run([merged, p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
-                        else:
-                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
-                        train_writer.add_run_metadata(run_metadata, 'step%d' % (epoch*6+5+j))
-                        train_writer.add_summary(summary, epoch*6+5+j)
-                    else:
-                        if include_cyc:
-                            t_loss, _ , _ , _ = sess.run([t, train_t, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                            p_loss, _ , _ , _ = sess.run([p, train_p, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                        else:
-                            summary, tp_loss, _ , _ , _  = sess.run([merged, tp, train_tp, assign_z1, assign_z2], feed_dict={x:xmb, c:cmb, prob:keep_prob}, options=run_options,run_metadata=run_metadata)
-                    if include_cyc:
-                        t_loss_list.append(t_loss)
-                        p_loss_list.append(p_loss)
-                    else:
-                        t_loss_list.append(tp_loss)
-                        p_loss_list.append(0)
-                
+                _ = sess.run(train_op, feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_ = sess.run([dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv],feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                if epoch%400 == 0 and i == 0:
+                    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                    run_metadata = tf.RunMetadata()
+                    summary = sess.run(merged,feed_dict={x:xmb,c:cmb})
+                    train_writer.add_run_metadata(run_metadata, 'step %d'%(epoch))
+                    train_writer.add_summary(summary, epoch)
+
+            dloss_list.append(dual_loss_)
+            ploss_list.append((primal_dec_loss_,primal_enc_loss_))
             if epoch%1000 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
+            if epoch%100 == 0:
+                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_))
 
-            print ("######################## epoch:%d si_loss:%f t_loss:%f p_loss:%f "%(epoch, s_loss[-1], t_loss_list[-1], p_loss_list[-1]))
-
-        y1_out_list = []
-        for i in range(100):
-            tmp = []
-            for j in range(n_train//batch_size):
-                y1_ = sess.run(y1, feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
-                tmp.append(y1_)
-            y1_out_list.append(np.concatenate(tmp, axis=0))
-        y1_ = np.array(y1_out_list)
-        #y1_ = np.mean(y1_, axis=0)
-        y1_out_list = []
         eps2 = standard_normal([test_batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
         eps1 = standard_normal([test_batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
         noise = standard_normal([test_batch_size, inp_data_dim], name="test_noise") * 1.0 # (batch_size, eps_dim)
         z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         y1_t, y2_t, _ , _ , _ = decoder_network(z1_t, z2_t, C_t, True, noise)
-        for i in range(250):
-            y1t_ = sess.run(y1_t)
-            y1_out_list.append(y1t_)
-        y1_t_ = np.array(y1_out_list)
 
         train_writer.close()
 
         save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'modelclf.ckpt'))
         print ("Model Saved at:", save_path)
         
-        closs = []
-        train_z2 = []
-        train_z1 = []
-        for i in range(niter_clf):
-            for j in range(n_train//batch_size):
-                indices = load_minibatch()
-                #z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[j*batch_size:(j+1)*batch_size,0:inp_data_dim], c:XC_dataset[j*batch_size:(j+1)*batch_size,inp_data_dim:]})
-                z1_, z2_ = sess.run([z1,z2], feed_dict={x:XC_dataset[indices,0:inp_data_dim], c:XC_dataset[indices,inp_data_dim:]})
-                if i < 100:
-                    train_z2.append(z2_)
-                if i == 0:
-                    train_z1.append(z1_)
-                #indices = get_indices()
-                #loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_[indices], labels:raw_labels[j*batch_size:(j+1)*batch_size][indices]})
-                loss_, _, out_soft_, out_logits_ = sess.run([loss, train_clf, out_soft, out_logits], feed_dict={z_input:z2_, labels:raw_labels[indices]})
-                pred_labels = np.argmax(out_soft_, axis=1)
-                train_accuracy = (pred_labels==raw_labels[indices])
-                train_accuracy = np.sum(train_accuracy)/(train_accuracy.shape[0]*1.0)
-            print("epoch:%d loss:%f train_accuracy:%f"%(i, loss_, train_accuracy))
-            closs.append((loss_, train_accuracy))
-        
-        test_z2 = []
-        test_out_prob = []
-        for i in range(250):
-            z2t_ = sess.run(z2_t)
-            test_z2.append(z2t_)
-            out_logits_, out_soft_ = sess.run([out_logits, out_soft], feed_dict={z_input:z2t_,labels:test_labels})
-            test_out_prob.append(out_soft_)
-        z2t_out = np.array(test_out_prob)
-        z2t_out = np.mean(z2t_out, axis=0)
-        pred_labels = np.argmax(z2t_out, axis=1)
-        score = z2t_out[np.arange(0,pred_labels.shape[0]),pred_labels]        
-        test_accuracy = (pred_labels==test_labels)
-        print("Test Classification Number:", np.sum(test_accuracy))
-        test_accuracy = np.sum(test_accuracy)/(test_accuracy.shape[0]*1.0)
-        print ("Test Classification Accuracy:", test_accuracy)
-        #print ("Test ROC Score:", roc_auc_score(test_labels, score))
-        save_path = saver.save(sess, os.path.join(FLAGS.logdir, 'model.ckpt'))
-        print ("Model Saved at:", save_path)
+        # Traaining Classifier
+        clf_loss_list = []
+        for i in range(n_clf_epoch):
+            for j in range(ntrain//batch_size):
+                xmb = X_train[j*batch_size:(j+1)*batch_size]
+                cmb = C_train[j*batch_size:(j+1)*batch_size]
+                sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
+                cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+            if i%100 == 0:
+                print("epoch:",i," closs:",cl_loss_," train_acc:",label_acc_)
+            clf_loss_list.append((cl_loss_, label_acc_))
+
+        # Test Set
+        logits_test, closs_test = classifier(z2_t,labels,reuse=True)
+        prob_test = tf.nn.softmax(logits_test)
+        correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
+        label_acc_test = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))        
+        label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})
+        print("Test Set label Accuracy:", label_acc_)
+        test_prob = []
+        test_acc = []
+        for  i in range(250):
+            lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})
+            test_prob.append(lt)
+            test_acc.append(la)
+        avg_test_prob = np.mean(test_prob,axis=0)
+        avg_test_acc1 = np.mean((np.argmax(avg_test_prob,axis=1)==L_test))
+        avg_test_acc = np.mean(test_acc)
+        print("Average Test Set Accuracy:",avg_test_acc, " :",avg_test_acc1)
         A_, B_, D_ = sess.run([A,B,D])
-    with open("/opt/data/saket/gene_data/data/y1_elu_100_100_5.pkl", "wb") as pkl_file:
-    #    pkl.dump(y1_, pkl_file)
-        #np.save("", y1_)
-        np.save("/opt/data/saket/gene_data/data/y1_elu_100_100_5.npy", y1_)
-        np.save("/opt/data/saket/gene_data/data/y1t.npy", y1_t_)
-        #np.save("/opt/data/saket/gene_data/data/train_z2.npy", train_z2)
-        np.save("/opt/data/saket/gene_data/data/test_z2.npy", test_z2)
-        np.save("/opt/data/saket/gene_data/data/train_z2.npy",train_z2)
-        np.save("/opt/data/saket/gene_data/data/train_z1.npy",train_z1)
-        #np.save("/opt/data/saket/gene_data/data/train_z1.npy", train_z1)
-        np.save("/opt/data/saket/gene_data/data/A_elu_100_100_5.npy", A_)
-        np.save("/opt/data/saket/gene_data/data/D_elu_100_100_5.npy", D_)
-        np.save("/opt/data/saket/gene_data/data/B_elu_100_100_5.npy", B_)
-        np.save("/opt/data/saket/gene_data/data/closs.npy", closs)
-    with open("/opt/data/saket/gene_data/data/s_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(s_loss, pkl_file)
-    with open("/opt/data/saket/gene_data/data/t_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(t_loss_list, pkl_file)
-    with open("/opt/data/saket/gene_data/data/p_loss_elu_xavier_100_100_5.pkl", "wb") as pkl_file:
-        pkl.dump(p_loss_list, pkl_file)
+
+    np.save("dloss.npy", dloss_list)
+    np.save("ploss.npy", ploss_list)
+    np.save("clf_loss.npy", clf_loss_list)
+    np.save("A.npy",A_)
+    np.save("B.npy",B_)
+    np.save("delta.npy",D_)
+    np.save("test_acc.npy",test_acc)
+    np.save("test_prob.npy",test_prob)
 
 def main():
     tf.reset_default_graph()
@@ -523,33 +371,25 @@ def main():
     prob = tf.placeholder_with_default(1.0, shape=())
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
+    labels = tf.placeholder(tf.int64, shape=(None))
 
+    # Sample noise and eps for encoder
     MVN_e2 = ds.MultivariateNormalDiag(tf.zeros((eps2_dim)), tf.ones((eps2_dim)))
     MVN_e1 = ds.MultivariateNormalDiag(tf.zeros((eps1_dim)), tf.ones((eps1_dim)))
     MVN_noise = ds.MultivariateNormalDiag(tf.zeros((inp_data_dim)), tf.ones((inp_data_dim)))
-    #eps2 = standard_normal([batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
     eps2 = MVN_e2.sample(batch_size)
-    #eps1 = standard_normal([batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
     eps1 = MVN_e1.sample(batch_size)
     noise = MVN_noise.sample(batch_size)
+
     z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False, prob)
     y1, y2, A, B, D = decoder_network(z1, z2, c, False, noise)
     variable_summaries(y1, name="y1_for_input_x")
     z = tf.concat([z1,z2], axis=1)
-    z_list = [z]
-    y1_list = [y1]
-    for i in range(0):
-        z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
-        # z1, z2 = graph_replace([z1,z2], {x:x,c:c})
-        y1, y2, A, B, D = decoder_network(z1, z2, c, True, noise)
-        # y1,y2 = graph_replace([y1,y2],{z1:z1,z2:z2})
-        z = tf.concat([z1,z2], axis=1)
-        z_list.append(z)
-        y1_list.append(y1)
-
+    
+    # sample from prior
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
     z_sample_ = MVN.sample(n_samples)
-    z_sample_ = tf.Print(z_sample_, [z_sample_], message="Sample z....")
+    # z_sample_ = tf.Print(z_sample_, [z_sample_], message="Sample z....")
     z_sample = tf.Variable(np.ones((n_samples, latent_dim+inp_data_dim), dtype=np.float32))
     z_assign = tf.assign(z_sample, z_sample_)
     z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
@@ -557,27 +397,16 @@ def main():
     z2_sample = transform_z2(z2_sample)
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
-    # x_sample = graph_replace(y1, {z1:z1_sample, z2:z2_sample})
     z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_list()), np.zeros(eps2.get_shape().as_list()), True, prob)
-    # z1_x_e, z2_x_e = graph_replace([z1, z2], {x:x_sample})
-    z_x_sample_encoded_list = [tf.concat([z1_x_e, z2_x_e], axis=1)]
-    for i in range(0):
-        z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
-        # z1_x_e, z2_x_e = graph_replace([z1_x_e, z2_x_e], {x:x_sample})
-        z_x_sample_encoded = tf.concat([z1_x_e, z2_x_e], axis=1)
-        z_x_sample_encoded_list.append(z_x_sample_encoded)
+    z_e = tf.concat([z1_x_e,z2_x_e],axis=1)
 
-    ########### Test Dataset
+    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv = cal_loss(x,z,y1,x_sample,z_sample,z_e)
 
-    si, theta, phi = cal_loss(x, z_list, y1_list, x_sample, z_sample, z_x_sample_encoded_list)
-    recon_loss = tf.reduce_mean(tf.square(y1-x))
-    recon_abs = tf.reduce_mean(tf.abs(y1-x))
-    recon_std = tf.sqrt(tf.reduce_mean(tf.square(tf.abs(y1-x) - tf.reduce_mean(tf.abs(y1-x)))))
+    # Classifier
+    logits, closs = classifier(z2,labels,reuse=False)
+    correct_label_pred = tf.equal(tf.argmax(logits,1),labels)
+    label_acc = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    z_input = tf.placeholder(dtype = tf.float32, shape = (None, latent_dim))
-    labels = tf.placeholder(dtype=tf.int64, shape=(None))
-    loss, out_logits, out_soft = classifier(z_input, labels, False)
-    loss = tf.reduce_sum(loss)
-    train(si, theta, phi, x, c,recon_loss, y1, z1, z2, recon_abs, recon_std, A, B, D, z_assign, z_input, labels, loss, out_logits, out_soft, prob)
+    train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs)
 
 main()

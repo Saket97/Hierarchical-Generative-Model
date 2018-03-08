@@ -38,11 +38,15 @@ eps2_dim = 20
 eps1_dim = 10
 enc_net_hidden_dim = 512
 n_samples = batch_size
-n_epoch = 55000
+n_epoch = 20000
 n_clf_epoch = 5000
 keep_prob = 1
 n_train = 160
+ntrain=160
 n_test = 52
+cyc1 = 5
+cyc2 = 10
+thresh_adv = 0.5
 # filename = "M255.pkl"
 """ Dataset """
 def load_dataset():
@@ -58,16 +62,16 @@ def load_dataset():
     # raw_data,labels, cov = normalize_each_class(raw_data, labels, cov)
     assert(np.shape(raw_data)[0] == np.shape(cov)[0])
     raw_data_mean = np.mean(raw_data, axis=0)
-    raw_data = (raw_data-1.0*raw_data_mean)
+    raw_data = (raw_data-1.0*raw_data_mean)/5.0
    # print("raw min",np.min(raw_data))
     cov_data_mean = np.mean(cov, axis=0)
-    cov_data = (cov-1.0*cov_data_mean)
+    cov_data = (cov-1.0*cov_data_mean)/5.0
     print("raw max",np.max(raw_data))
     print("cov min",np.min(cov))
     print("cov max",np.max(cov))
     return raw_data[0:n_train], cov[0:n_train], labels[0:n_train], raw_data[n_train:n_train+n_test], cov[n_train:n_train+n_test], labels[n_train:n_train+n_test]
 
-X_dataset, C_dataset, raw_labels, X_t, C_t, test_labels = load_dataset()
+X_dataset, C_dataset, L_train, X_t, C_t, L_test = load_dataset()
 XC_dataset = np.concatenate((X_dataset, C_dataset), axis=1)
 print("Dataset Loaded... X:", np.shape(X_dataset), " C:", np.shape(C_dataset))
 
@@ -106,6 +110,7 @@ def lrelu(x, leak=0.2, name="lrelu"):
 def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse, prob):
     with tf.variable_scope("encoder", reuse = reuse):
         h = tf.concat([x, c], 1)
+        h = add_linear(eps1, h, activation_fn=lrelu,scope="encoder_in_noise",reuse=False)
         for i in range(n_layer):
             h = slim.fully_connected(h,latent_dim,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
             if reuse==False and i == 0:
@@ -117,6 +122,7 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse
         # z1 = tf.nn.dropout(z1, prob)
 
         h = tf.concat([x, c], axis=1)
+        h = add_linear(eps2, h, activation_fn=lrelu,scope="encoder_in_noise_z2",reuse=False)
         h = add_linear(z1, h, activation_fn=tf.nn.elu, scope="z1_skip", reuse=False)
         for i in range(n_layer):
             h = slim.fully_connected(h, latent_dim, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
@@ -181,31 +187,35 @@ def adversary(x, z, n_layer=2, n_hidden=1024, reuse=False):
         with tf.variable_scope("x_embed", reuse=reuse):
             h = slim.repeat(x,1,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
             x_embed = slim.fully_connected(h,256,activation_fn=None)
+            #x_embed = tf.Print(x_embed,[x_embed],message="x_embed")
 
         with tf.variable_scope("z1_embed", reuse=reuse):
             h = slim.repeat(z1, 1, slim.fully_connected, n_hidden, activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
             z1_embed = slim.fully_connected(h,256,activation_fn=None)
+            #z1_embed = tf.Print(z1_embed,[z1_embed],message="z1_embed")
         
         with tf.variable_scope("z2_embed", reuse=reuse):
             h = slim.repeat(z2, 1, slim.fully_connected, n_hidden,activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.1))
             z2_embed = slim.fully_connected(h,256,activation_fn=None)
-        h = add_linear(z1_embed,x_embed,activation_fn=lrelu,scope="data_net_z1",reuse=False)
-        h = add_linear(z2_embed,h,activation_fn=lrelu,scope="data_net_z2",reuse=False)
-               
+            #z2_embed = tf.Print(z2_embed,[z2_embed],message="z2_embed")
+        #h = add_linear(z1_embed,x_embed,activation_fn=lrelu,scope="data_net_z1",reuse=False)
+        #h = add_linear(z2_embed,h,activation_fn=lrelu,scope="data_net_z2",reuse=False)
+        h = tf.concat([x_embed,z1_embed,z2_embed],axis=1)       
         h = slim.repeat(h,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return out
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.1))
-        h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.01))
+        h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
+        #h = tf.Print(h,[h],message="trandform_z2")
     return h
 
-def cal_loss(x, z, y1, x_sample, z_sample, z_e):
+def cal_loss(x_real, z_fake, y1, x_fake, z_real, z_e):
     with tf.variable_scope("Loss"):
-        Td = adversary(x,z,reuse=False)
-        Ti = adversary(x_sample,z_sample,reuse=True)
+        Td = adversary(x_real,z_fake,reuse=False)
+        Ti = adversary(x_fake,z_real,reuse=True)
 
         #Adversary Accuracy
         correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
@@ -217,15 +227,16 @@ def cal_loss(x, z, y1, x_sample, z_sample, z_e):
         dual_loss = d_loss_d+d_loss_i
 
         # Primal Loss
-        recon_loss_x_z_x = tf.reduce_mean(tf.norm(x-y1, axis=1))
-        recon_loss_z_x_z = tf.reduce_mean(tf.norm(z-z_e, axis=1))
+        recon_loss_x_z_x = tf.reduce_mean(tf.norm(x_real-y1, axis=1))
+        recon_loss_z_x_z = tf.reduce_mean(tf.norm(z_real-z_e, axis=1))
         phi = tf.reduce_mean(Td,axis=0)
         theta = -tf.reduce_mean(Ti,axis=0)
         kls = phi+theta
-        primal_enc_loss = phi+cyc*recon_loss_x_z_x
-        primal_dec_loss = theta+cyc*recon_loss_z_x_z
+        primal_enc_loss = phi+cyc1*recon_loss_x_z_x
+        primal_dec_loss = theta+cyc2*recon_loss_z_x_z
+        primal_loss = primal_enc_loss + primal_dec_loss
 
-    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv
+    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv,kls,primal_loss
 
 def classifier(x_input,labels, reuse=False):
     with tf.variable_scope("Classifier", reuse=reuse):
@@ -250,14 +261,16 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
     r_loss = r_loss - r_loss_clf - r_loss_adv
 
     # Optimiser definition
-    primal_dec_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
-    primal_enc_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    #primal_dec_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    #primal_enc_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
+    primal_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
     dual_opt = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True)
     classifier_opt = tf.train.AdamOptimizer(learning_rate=1e-4)
-    primal_dec_op = primal_dec_opt.minimize(primal_dec_loss+r_loss, var_list=dvars+tz2vars)
-    primal_enc_op = primal_enc_opt.minimize(primal_enc_loss+r_loss, var_list=evars)
+    #primal_dec_op = primal_dec_opt.minimize(primal_dec_loss+r_loss, var_list=dvars+tz2vars)
+    #primal_enc_op = primal_enc_opt.minimize(primal_enc_loss+r_loss, var_list=evars)
+    primal_op = primal_opt.minimize(primal_loss+r_loss, var_list=dvars+evars+tz2vars)
     dual_op = dual_opt.minimize(dual_loss+r_loss_adv, var_list=lvars)
-    train_op = tf.group(primal_dec_op,primal_enc_op,dual_op)
+    train_op = tf.group(primal_op,dual_op)
     clf_train_op = classifier_opt.minimize(closs+r_loss_clf, var_list=cvars)
 
     merged = tf.summary.merge_all()
@@ -287,7 +300,7 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
                 _ = sess.run(train_op, feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_ = sess.run([dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv],feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_,kls_,primal_loss_ = sess.run([dual_loss, primal_dec_loss, primal_enc_loss,label_acc_adv,kls,primal_loss],feed_dict={x:xmb, c:cmb, prob:keep_prob})
                 if epoch%400 == 0 and i == 0:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
@@ -296,17 +309,17 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
                     train_writer.add_summary(summary, epoch)
 
             dloss_list.append(dual_loss_)
-            ploss_list.append((primal_dec_loss_,primal_enc_loss_))
+            ploss_list.append((primal_dec_loss_,primal_enc_loss_,primal_loss_))
             if epoch%1000 == 0:
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
             if epoch%100 == 0:
-                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_))
+                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f kls:%f primal_loss:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_,label_acc_adv_,kls_,primal_loss_))
 
         eps2 = standard_normal([test_batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
         eps1 = standard_normal([test_batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
         noise = standard_normal([test_batch_size, inp_data_dim], name="test_noise") * 1.0 # (batch_size, eps_dim)
-        z1_t, z2_t = encoder_network(X_t, C_t, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
+        z1_t, z2_t = encoder_network(X_t.astype(np.float32), C_t.astype(np.float32), enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, True, prob)
         y1_t, y2_t, _ , _ , _ = decoder_network(z1_t, z2_t, C_t, True, noise)
 
         train_writer.close()
@@ -317,9 +330,9 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
         # Traaining Classifier
         clf_loss_list = []
         for i in range(n_clf_epoch):
-            for j in range(ntrain//batch_size):
-                xmb = X_train[j*batch_size:(j+1)*batch_size]
-                cmb = C_train[j*batch_size:(j+1)*batch_size]
+            for j in range(n_train//batch_size):
+                xmb = X_dataset[j*batch_size:(j+1)*batch_size]
+                cmb = C_dataset[j*batch_size:(j+1)*batch_size]
                 sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
                 cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
             if i%100 == 0:
@@ -371,6 +384,8 @@ if __name__ == "__main__":
     noise = MVN_noise.sample(batch_size)
 
     z1, z2 = encoder_network(x, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, eps1, eps2, False, prob)
+    #z1 = tf.Print(z1,[z1],message="z1_original")
+    #z2 = tf.Print(z2,[z2],message="z2_original")
     y1, y2, A, B, D = decoder_network(z1, z2, c, False, noise)
     variable_summaries(y1, name="y1_for_input_x")
     z = tf.concat([z1,z2], axis=1)
@@ -386,10 +401,12 @@ if __name__ == "__main__":
     z2_sample = transform_z2(z2_sample)
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
-    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_list()), np.zeros(eps2.get_shape().as_list()), True, prob)
+    z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_list(), dtype=np.float32), np.zeros(eps2.get_shape().as_list(), dtype=np.float32), True, prob)
+    #z1_x_e = tf.Print(z1_x_e,[z1_x_e],message="z1_x_e")
+    #z2_x_e = tf.Print(z2_x_e,[z2_x_e],message="z2_x_e")
     z_e = tf.concat([z1_x_e,z2_x_e],axis=1)
 
-    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv = cal_loss(x,z,y1,x_sample,z_sample,z_e)
+    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv, kls, primal_loss = cal_loss(x,z,y1,x_sample,z_sample,z_e)
 
     # Classifier
     logits, closs = classifier(z2,labels,reuse=False)

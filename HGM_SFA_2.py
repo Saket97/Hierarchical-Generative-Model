@@ -112,26 +112,26 @@ def encoder_network(x, c, latent_dim, n_layer, z1_dim, z2_dim, eps1, eps2, reuse
         h = tf.concat([x, c], 1)
         h = add_linear(eps1, h, activation_fn=lrelu,scope="encoder_in_noise",reuse=False)
         for i in range(n_layer):
-            h = slim.fully_connected(h,latent_dim,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
+            h = slim.fully_connected(h,latent_dim,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.2))
             if reuse==False and i == 0:
                 h = add_linear(eps1, h, activation_fn=tf.nn.elu,scope="encoder_z1",reuse=False)
             else:
                 h = add_linear(eps1, h, activation_fn=tf.nn.elu,scope="encoder_z1",reuse=True)
         
-        z1 = slim.fully_connected(h, z1_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        z1 = slim.fully_connected(h, z1_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.2))
         # z1 = tf.nn.dropout(z1, prob)
 
         h = tf.concat([x, c], axis=1)
         h = add_linear(eps2, h, activation_fn=lrelu,scope="encoder_in_noise_z2",reuse=False)
         h = add_linear(z1, h, activation_fn=tf.nn.elu, scope="z1_skip", reuse=False)
         for i in range(n_layer):
-            h = slim.fully_connected(h, latent_dim, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
+            h = slim.fully_connected(h, latent_dim, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.01))
             if reuse==False and i == 0:
                 h = add_linear(eps2, h, activation_fn=tf.nn.elu, scope="encoder_z2",reuse=False)
             else:
                 h = add_linear(eps2, h, activation_fn=tf.nn.elu, scope="encoder_z2",reuse=True)
                 
-        z2 = slim.fully_connected(h, z2_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.1))
+        z2 = slim.fully_connected(h, z2_dim, activation_fn=None, biases_initializer=tf.truncated_normal_initializer, weights_regularizer = slim.l2_regularizer(0.01))
         
         #z1 = tf.Print(z1, [z1], message="z1")
         #z2 = tf.Print(z2, [z2], message="z2")
@@ -152,7 +152,7 @@ def decoder_network(z1, z2, c, reuse, noise):
     assert(z1.get_shape().as_list()[0] == z2.get_shape().as_list()[0])
     with tf.variable_scope("decoder", reuse = reuse):
         inp = tf.concat([z2,c], axis=1)
-        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.orthogonal_initializer(gain=3), kernel_regularizer=slim.l1_regularizer(1.0))
+        y2 = tf.layers.dense(inp, inp_data_dim, use_bias=False, kernel_initializer=tf.orthogonal_initializer(gain=3), kernel_regularizer=slim.l1_regularizer(0.01))
         print("y2_name:",y2.name)
         weights = tf.get_default_graph().get_tensor_by_name("decoder/dense"+"/kernel:0")
         DELTA = tf.get_variable("DELTA", shape=(inp_data_dim), initializer=tf.truncated_normal_initializer) # It is a diagonal matrix
@@ -203,11 +203,14 @@ def adversary(x, z, n_layer=2, n_hidden=1024, reuse=False):
         h = tf.concat([x_embed,z1_embed,z2_embed],axis=1)       
         h = slim.repeat(h,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+        #out = tf.Print(out,[out],message="adversary")
     return out
 
 def transform_z2(z2, reuse=False):
     with tf.variable_scope("transform_z2", reuse = reuse):
-        h = slim.repeat(z2, 3, slim.fully_connected, 512, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.01))
+        h = slim.repeat(z2, 3, slim.fully_connected, 1024, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.01))
+        h = slim.fully_connected(h,512, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
+        h = slim.fully_connected(h,256, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
         h = slim.fully_connected(h,latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
         #h = tf.Print(h,[h],message="trandform_z2")
     return h
@@ -236,7 +239,7 @@ def cal_loss(x_real, z_fake, y1, x_fake, z_real, z_e):
         primal_dec_loss = theta+cyc2*recon_loss_z_x_z
         primal_loss = primal_enc_loss + primal_dec_loss
 
-    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv,kls,primal_loss
+    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x
 
 def classifier(x_input,labels, reuse=False):
     with tf.variable_scope("Classifier", reuse=reuse):
@@ -294,13 +297,13 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
         for epoch in range(n_epoch):
             X_dataset = XC_dataset[:,0:inp_data_dim]
             C_dataset = XC_dataset[:,inp_data_dim:]
-            sess.run(z_assign, feed_dict={x:XC_dataset[0:batch_size,0:inp_data_dim], c:XC_dataset[0:batch_size,inp_data_dim:], prob:keep_prob})
+            #sess.run(z_assign, feed_dict={x:XC_dataset[0:batch_size,0:inp_data_dim], c:XC_dataset[0:batch_size,inp_data_dim:], prob:keep_prob})
 
             for i in range(np.shape(X_dataset)[0]//batch_size):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
                 _ = sess.run(train_op, feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_,kls_,primal_loss_ = sess.run([dual_loss, primal_dec_loss, primal_enc_loss,label_acc_adv,kls,primal_loss],feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_,kls_,primal_loss_, phi_, recon_loss_x_z_x_ = sess.run([dual_loss, primal_dec_loss, primal_enc_loss,label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x],feed_dict={x:xmb, c:cmb, prob:keep_prob})
                 if epoch%400 == 0 and i == 0:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
@@ -314,7 +317,7 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
             if epoch%100 == 0:
-                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f kls:%f primal_loss:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_,label_acc_adv_,kls_,primal_loss_))
+                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f kls:%f primal_loss:%f phi:%f recon_loss_x_z_x:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_,label_acc_adv_,kls_,primal_loss_,phi_,recon_loss_x_z_x_))
 
         eps2 = standard_normal([test_batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
         eps1 = standard_normal([test_batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
@@ -394,10 +397,10 @@ if __name__ == "__main__":
     MVN = ds.MultivariateNormalDiag(tf.zeros((latent_dim+inp_data_dim)), tf.ones((latent_dim+inp_data_dim)))
     z_sample_ = MVN.sample(n_samples)
     # z_sample_ = tf.Print(z_sample_, [z_sample_], message="Sample z....")
-    z_sample = tf.Variable(np.ones((n_samples, latent_dim+inp_data_dim), dtype=np.float32))
-    z_assign = tf.assign(z_sample, z_sample_)
-    z1_sample = tf.slice(z_sample, [0, 0], [-1, inp_data_dim])
-    z2_sample = tf.slice(z_sample, [0, inp_data_dim], [-1, -1])
+    #z_sample = tf.Variable(np.ones((n_samples, latent_dim+inp_data_dim), dtype=np.float32))
+    #z_assign = tf.assign(z_sample, z_sample_)
+    z1_sample = tf.slice(z_sample_, [0, 0], [-1, inp_data_dim])
+    z2_sample = tf.slice(z_sample_, [0, inp_data_dim], [-1, -1])
     z2_sample = transform_z2(z2_sample)
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
@@ -406,7 +409,7 @@ if __name__ == "__main__":
     #z2_x_e = tf.Print(z2_x_e,[z2_x_e],message="z2_x_e")
     z_e = tf.concat([z1_x_e,z2_x_e],axis=1)
 
-    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv, kls, primal_loss = cal_loss(x,z,y1,x_sample,z_sample,z_e)
+    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv, kls, primal_loss, phi, recon_loss_x_z_x = cal_loss(x,z,y1,x_sample,z_sample,z_e)
 
     # Classifier
     logits, closs = classifier(z2,labels,reuse=False)

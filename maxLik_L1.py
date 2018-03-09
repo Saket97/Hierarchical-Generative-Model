@@ -122,8 +122,8 @@ def train(z, closs):
 
     primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
     adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
-    train_op = tf.group(primal_train_op, adversary_train_op)
     clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
+    train_op = tf.group(primal_train_op, adversary_train_op, clf_train_op)
     
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
@@ -137,27 +137,33 @@ def train(z, closs):
     t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log_test = t1+t2+t3
     x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test)
-   
+    logits_test, closs_test = classifier(z_test,labels,reuse=True)
+    prob_test = tf.nn.softmax(logits_test)
+    correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
+    label_acc_test = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+
     saver = tf.train.Saver()
     sess = tf.Session()
     #saver.restore(sess,"/opt/data/saket/model.ckpt-54000")
     sess.run(tf.global_variables_initializer())
     si_list = []
     vtp_list = []
+    clf_loss_list = []
     post_test_list = []
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             cmb = C_train[j*batch_size:(j+1)*batch_size]
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
-            sess.run(train_op, feed_dict={x:xmb,c:cmb})
-            si_loss,vtp_loss = sess.run([dual_loss, primal_loss], feed_dict={x:xmb,c:cmb})
+            sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+            si_loss,vtp_loss,closs_,label_acc_ = sess.run([dual_loss, primal_loss, closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
             si_list.append(si_loss)
+            clf_loss_list.append((closs_, label_acc_))
             vtp_list.append(vtp_loss)
         if i%100 == 0:
             Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv], feed_dict={x:xmb,c:cmb})
             print("epoch:",i," si:",si_list[-1]," vtp:",vtp_list[-1]," -KL_r_q:",KL_neg_r_q_, " x_post:",x_post_prob_log_," logz:",logz_," logr:",logr_, \
-            " d_loss_d:",d_loss_d_, " d_loss_i:",d_loss_i_, " adv_accuracy:",label_acc_adv_)
+            " d_loss_d:",d_loss_d_, " d_loss_i:",d_loss_i_, " adv_accuracy:",label_acc_adv_, " closs:",closs_," label_acc:",label_acc_)
         if i%1000 == 0:
             x_post_test = sess.run(x_post_prob_log_test)
             post_test_list.append(x_post_test)
@@ -165,43 +171,35 @@ def train(z, closs):
             path = saver.save(sess,"/opt/data/saket/model.ckpt",i)
             print("Model saved at ",path)
     # Training complete
-    z_list=[]
-    clf_loss_list = []
-    for i in range(n_clf_epoch):
-        tmp = []
-        for j in range(ntrain//batch_size):
-            xmb = X_train[j*batch_size:(j+1)*batch_size]
-            cmb = C_train[j*batch_size:(j+1)*batch_size]
-            sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
-            z_ = sess.run(z, feed_dict={x:xmb,c:cmb})
-            cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
-            tmp.append(z_)
-        if i%100 == 0:
-            print("epoch:",i," closs:",cl_loss_," train_acc:",label_acc_)
-        train_z = np.stack(tmp, axis=0)
-        if i < 250:
-            z_list.append(train_z)
-        clf_loss_list.append((cl_loss_, label_acc_))
+    # z_list=[]
+    # for i in range(n_clf_epoch):
+    #     tmp = []
+    #     for j in range(ntrain//batch_size):
+    #         xmb = X_train[j*batch_size:(j+1)*batch_size]
+    #         cmb = C_train[j*batch_size:(j+1)*batch_size]
+    #         sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
+    #         z_ = sess.run(z, feed_dict={x:xmb,c:cmb})
+    #         cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+    #         tmp.append(z_)
+    #     if i%100 == 0:
+    #         print("epoch:",i," closs:",cl_loss_," train_acc:",label_acc_)
+    #     train_z = np.stack(tmp, axis=0)
+    #     if i < 250:
+    #         z_list.append(train_z)
     
     A_,B_,DELTA_inv_ = sess.run([A,B,DELTA_inv])
     np.save("si_loss1.npy", si_list)
     np.save("vtp_loss1.npy", vtp_list)
     np.save("x_post_list1.npy",post_test_list)
-    np.save("z_train_list1.npy",z_list)
     np.save("A1.npy",A_)
     np.save("B1.npy",B_)
     np.save("delta_inv1.npy",DELTA_inv_)
     np.save("clf_loss_list1.npy",clf_loss_list)
 
     # Test Set
-    z_list = []
-    logits_test, closs_test = classifier(z_test,labels,reuse=True)
-    prob_test = tf.nn.softmax(logits_test)
-    correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
-    label_acc_test = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))        
+    z_list = []       
     label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})
     print("Test Set label Accuracy:", label_acc_)
-    z_list = []
     test_prob = []
     test_acc = []
     for  i in range(250):

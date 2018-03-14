@@ -34,18 +34,18 @@ inp_cov_dim = 10 #d'
 latent_dim = 100 #k
 batch_size = 160
 test_batch_size = 52
-eps2_dim = 20
-eps1_dim = 10
+eps2_dim = 40
+eps1_dim = 20
 enc_net_hidden_dim = 512
 n_samples = batch_size
 n_epoch = 20000
-n_clf_epoch = 5000
+n_clf_epoch = 15000
 keep_prob = 1
 n_train = 160
 ntrain=160
 n_test = 52
 cyc1 = 5
-cyc2 = 10
+cyc2 = 50
 thresh_adv = 0.5
 # filename = "M255.pkl"
 """ Dataset """
@@ -215,6 +215,15 @@ def transform_z2(z2, reuse=False):
         #h = tf.Print(h,[h],message="trandform_z2")
     return h
 
+def transform_z1(z1, reuse=False):
+    with tf.variable_scope("transform_z1", reuse = reuse):
+        h = slim.repeat(z1, 3, slim.fully_connected, 1024, activation_fn=lrelu, weights_regularizer = slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,512, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
+        h = slim.fully_connected(h,256, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
+        h = slim.fully_connected(h,inp_data_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        #h = tf.Print(h,[h],message="trandform_z2")
+    return h
+
 def cal_loss(x_real, z_fake, y1, x_fake, z_real, z_e):
     with tf.variable_scope("Loss"):
         Td = adversary(x_real,z_fake,reuse=False)
@@ -239,7 +248,7 @@ def cal_loss(x_real, z_fake, y1, x_fake, z_real, z_e):
         primal_dec_loss = theta+cyc2*recon_loss_z_x_z
         primal_loss = primal_enc_loss + primal_dec_loss
 
-    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x
+    return dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x,theta,recon_loss_z_x_z
 
 def classifier(x_input,labels, reuse=False):
     with tf.variable_scope("Classifier", reuse=reuse):
@@ -303,7 +312,7 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
                 xmb = X_dataset[i*batch_size:(i+1)*batch_size]
                 cmb = C_dataset[i*batch_size:(i+1)*batch_size]
                 _ = sess.run(train_op, feed_dict={x:xmb, c:cmb, prob:keep_prob})
-                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_,kls_,primal_loss_, phi_, recon_loss_x_z_x_ = sess.run([dual_loss, primal_dec_loss, primal_enc_loss,label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x],feed_dict={x:xmb, c:cmb, prob:keep_prob})
+                dual_loss_, primal_dec_loss_, primal_enc_loss_,label_acc_adv_,kls_,primal_loss_, phi_, recon_loss_x_z_x_,theta_,recon_loss_z_x_z_ = sess.run([dual_loss, primal_dec_loss, primal_enc_loss,label_acc_adv,kls,primal_loss,phi,recon_loss_x_z_x,theta,recon_loss_z_x_z],feed_dict={x:xmb, c:cmb, prob:keep_prob})
                 if epoch%400 == 0 and i == 0:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
@@ -317,7 +326,7 @@ def train(primal_dec_loss, primal_enc_loss, dual_loss, label_acc_adv, closs):
                 save_path = saver.save(sess, os.path.join(FLAGS.logdir, "model.ckpt"), epoch)
                 print("Model saved at: ", save_path)
             if epoch%100 == 0:
-                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f kls:%f primal_loss:%f phi:%f recon_loss_x_z_x:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_,label_acc_adv_,kls_,primal_loss_,phi_,recon_loss_x_z_x_))
+                print("epoch:%d adv_loss:%f primal_enc_loss:%f primal_dec_loss:%f adv_accu:%f kls:%f primal_loss:%f phi:%f recon_loss_x_z_x:%f theta:%f recon_loss_z_x_z:%f"%(epoch, dual_loss_,primal_enc_loss_,primal_dec_loss_,label_acc_adv_,kls_,primal_loss_,phi_,recon_loss_x_z_x_,theta_,recon_loss_z_x_z_))
 
         eps2 = standard_normal([test_batch_size, eps2_dim], name="eps2") * 1.0 # (batch_size, eps_dim)
         eps1 = standard_normal([test_batch_size, eps1_dim], name="eps1") * 1.0 # (batch_size, eps_dim)
@@ -402,6 +411,7 @@ if __name__ == "__main__":
     z1_sample = tf.slice(z_sample_, [0, 0], [-1, inp_data_dim])
     z2_sample = tf.slice(z_sample_, [0, inp_data_dim], [-1, -1])
     z2_sample = transform_z2(z2_sample)
+    z1_sample = transform_z1(z1_sample)
     z_sample = tf.concat([z1_sample, z2_sample], axis=1)
     x_sample, _ , _ , _ , _ = decoder_network(z1_sample, z2_sample, c, True, noise)
     z1_x_e, z2_x_e = encoder_network(x_sample, c, enc_net_hidden_dim, 2, inp_data_dim, latent_dim, np.zeros(eps1.get_shape().as_list(), dtype=np.float32), np.zeros(eps2.get_shape().as_list(), dtype=np.float32), True, prob)
@@ -409,7 +419,7 @@ if __name__ == "__main__":
     #z2_x_e = tf.Print(z2_x_e,[z2_x_e],message="z2_x_e")
     z_e = tf.concat([z1_x_e,z2_x_e],axis=1)
 
-    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv, kls, primal_loss, phi, recon_loss_x_z_x = cal_loss(x,z,y1,x_sample,z_sample,z_e)
+    dual_loss, primal_dec_loss, primal_enc_loss, label_acc_adv, kls, primal_loss, phi, recon_loss_x_z_x,theta,recon_loss_z_x_z = cal_loss(x,z,y1,x_sample,z_sample,z_e)
 
     # Classifier
     logits, closs = classifier(z2,labels,reuse=False)

@@ -10,7 +10,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 55000
+nepoch = 70000
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -98,6 +98,16 @@ def encoder(x,c, eps=None, n_layer=2, n_hidden=256, reuse=False):
     #Varz = tf.Print(Varz,[Varz],message="Varz")
     return z,Ez,Varz
 
+def decoder_mean(z,c, n_hidden=256, n_layers=2, reuse=False):
+    with tf.variable_scope("decoder",reuse=reuse):
+        with tf.variable_scope("z_only",reuse=reuse):
+            zh = slim.repeat(z,n_layers,slim.fully_connected,n_hidden,weights_regularizer=slim.l2_regularizer(0.1))
+        with tf.variable_scope("c_only",reuse=reuse): 
+            h = slim.repeat(c,n_layers,slim.fully_connected,n_hidden//2,weights_regularizer=slim.l2_regularizer(0.1))
+        h = tf.concat([zh,h],axis=1)
+        out = slim.fully_connected(h,inp_data_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.1))
+    return out
+
 def classifier(x_input,labels, reuse=False):
     with tf.variable_scope("Classifier", reuse=reuse):
         logits = slim.fully_connected(x_input, 3, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
@@ -109,6 +119,9 @@ def train(z, closs):
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
     c_vars = [var for var in t_vars if var.name.startswith("Classifier")]
     tp_var = [var for var in t_vars if var not in d_vars+c_vars]
+    #print("d_vars:",d_vars)
+    #print("c_vars:",c_vars)
+    #print("tp_var:",tp_var)
     assert(len(tp_var)+len(d_vars)+len(c_vars) == len(t_vars))
     assert(len(tp_var)>3)
     r_loss = tf.losses.get_regularization_loss()
@@ -118,17 +131,18 @@ def train(z, closs):
     r_loss += l1_regulariser(B)
     primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
-    classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
+    #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
+    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
     adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
-    clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
-    train_op = tf.group(primal_train_op, adversary_train_op, clf_train_op)
+    #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
+    train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    means = tf.matmul(z_test,A, transpose_b=True)+tf.matmul(C_test,B, transpose_b=True)
+    #means = tf.matmul(z_test,A, transpose_b=True)+tf.matmul(C_test,B, transpose_b=True)
+    means = decoder_mean(z_test,C_test,reuse=True)
     prec = tf.square(DELTA_inv)
     t = (X_test-means)
     t1 = t*prec*t
@@ -262,7 +276,8 @@ if __name__ == "__main__":
     # prior_prob_log = t1+t2+t3
 
     # Evaluating p(x|z)
-    means = tf.matmul(z,A, transpose_b=True)+tf.matmul(c,B, transpose_b=True)
+    #means = tf.matmul(z,A, transpose_b=True)+tf.matmul(c,B, transpose_b=True)
+    means = decoder_mean(z,c)
     prec = tf.square(DELTA_inv)
     t = (x-means)
     t1 = t*prec*t

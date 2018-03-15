@@ -221,13 +221,12 @@ def train(z, closs):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    #means = tf.matmul(z_test,A, transpose_b=True)+tf.matmul(C_test,B, transpose_b=True)
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv)
     t = (X_test-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
     t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec), axis=1)
+    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
     t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log_test = t1+t2+t3
     x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
@@ -370,8 +369,8 @@ if __name__ == "__main__":
     prec = tf.square(DELTA_inv)
     t = (x-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec), axis=1)
+    t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
+    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
     t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log = t1+t2+t3
     x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)

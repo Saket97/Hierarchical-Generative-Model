@@ -240,3 +240,19 @@ with open("recon_loss.pkl", "wb") as pkl_file:
 #     r = np.concatenate((i2[0:a],i1[0:a], i0[0:a]))
 #     np.random.shuffle(r)
     # return r 
+    
+    # Evaluating r(z|x)
+    # t = (z-R_mean)
+    # t1 = t*tf.exp(R_log_prec)*t
+    # t1 = -0.5*tf.reduce_sum(t1, axis=1)
+    # t2 = 0.5*tf.reduce_sum(R_log_prec, axis=1)
+    # t3 = -latent_dim*0.5*tf.log(2*math.pi)
+    # r_prob_log = t1+t2+t3
+
+    # # Evaluating prior on the posterior samples
+    # t = z
+    # t1 = t*t
+    # t1 = -0.5*tf.reduce_sum(t1, axis=1)
+    # t2 = 0
+    # t3 = -latent_dim*0.5*tf.log(2*math.pi)
+    # prior_prob_log = t1+t2+t3

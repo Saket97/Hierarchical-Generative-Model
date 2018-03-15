@@ -42,7 +42,7 @@ l1_regulariser = tf.contrib.layers.l1_regularizer(0.05)
 
 def get_zlogprob(z, z_dist):
     if z_dist == "gauss":
-        logprob = -0.5 * tf.reduce_sum(z*z  + latent_dim*np.log(2*np.pi), [1])
+        logprob = -0.5 * tf.reduce_sum(z*z  + np.log(2*np.pi), [1])
     elif z_dist == "uniform":
         logprob = 0.
     else:
@@ -69,8 +69,7 @@ def theta_ratio(A, B, Delta_inv, n_layer=1, n_hidden=128, reuse=False):
             a_vec = []
             for i in range(latent_dim):
                 tmp = tf.squeeze(tf.slice(A,[0,0,i],[-1,-1,1]),axis=2)
-                h = slim.batch_norm(tmp)
-                h = slim.fully_connected(h, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 128)
+                h = slim.fully_connected(tmp, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 128)
                 a_vec.append(h)
             A = tf.concat(a_vec, axis=1) # (N,12800)
 
@@ -78,16 +77,14 @@ def theta_ratio(A, B, Delta_inv, n_layer=1, n_hidden=128, reuse=False):
             b_vec = []
             for i in range(inp_cov_dim):
                 tmp = tf.squeeze(tf.slice(B,[0,0,i],[-1,-1,1]), axis=2)
-                h = slim.batch_norm(tmp)
-                h = slim.fully_connected(h, 64, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 64)
+                h = slim.fully_connected(tmp, 64, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 64)
                 b_vec.append(h)
             B = tf.concat(b_vec, axis=1) # (N,64*7)
 
         with tf.variable_scope("Delta_only", reuse=reuse):
             h = slim.fully_connected(Delta_inv, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         h = tf.concat([A,B,h], axis=1)
-        h = slim.repeat(h, 1, slim.fully_connected, 128, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
-        h = tf.nn.elu(slim.batch_norm(h))
+        h = slim.repeat(h, 1, slim.fully_connected, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h,1,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
     #out = tf.Print(out,[out],message="theta_ratio")
     return out
@@ -179,12 +176,12 @@ def classifier(x_input,labels, reuse=False):
         cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     return logits, tf.reduce_mean(cl_loss)
 
-def cal_theta_adv_loss():
-    n_samples = 100
+def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
+    # n_samples = 100
     p_samples_A = tf.random_normal([n_samples, inp_data_dim, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
-    q_samples_A, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
+    # q_samples_A, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
     p_ratio = theta_ratio(p_samples_A, p_samples_B, p_samples_D)
     q_ratio = theta_ratio(q_samples_A, q_samples_B, q_samples_D, reuse=True)
     #p_ratio = tf.Print(p_ratio,[p_ratio],message="p_ratio")
@@ -197,7 +194,7 @@ def cal_theta_adv_loss():
     #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
     label_acc_adv_theta = correct_labels_adv/(2.0*batch_size)
-    return dloss, label_acc_adv_theta
+    return dloss, label_acc_adv_theta, q_ratio
 
 def train(z, closs):
     t_vars = tf.trainable_variables()
@@ -327,7 +324,19 @@ if __name__ == "__main__":
     labels = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
     
-    A,B,DELTA_inv = generator(n_samples=1)
+    n_samples=100
+    A,B,DELTA_inv = generator(n_samples=n_samples)
+    A_mean, A_var = tf.nn.moments(A, axes=0)
+    A_std = tf.sqrt(A_var)
+    B_mean, B_var = tf.nn.moments(B, axes=0)
+    B_std = tf.sqrt(B_var)
+    D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
+    D_std = tf.sqrt(D_var)
+    
+    #normalising
+    A_norm = (A-A_mean)/(1.0*A_std)
+    B_norm = (B-B_mean)/(1.0*B_std)
+    D_norm = (DELTA_inv-D_mean)/(1.0*D_std)
 
     # Draw samples from posterior q(z2|x)
     print("Sampling from posterior...")
@@ -342,9 +351,22 @@ if __name__ == "__main__":
     logz = tf.reduce_mean(logz)
     logr = tf.reduce_mean(logr)
 
+    # reference and prior distribution for theta (A,B,delta)
+    logra = -0.5*tf.reduce_sum(A_norm*A_norm + tf.log(A_var) + np.log(2*np.pi), axis=[1,2])
+    logra = tf.reduce_mean(logra, axis=0)
+    logrb = -0.5*tf.reduce_sum(B_norm*B_norm + tf.log(B_var) + np.log(2*np.pi), axis=[1,2])
+    logrb = tf.reduce_mean(logrb, axis=0)
+    logrd = -0.5*tf.reduce_sum(D_norm*D_norm + tf.log(D_var) + np.log(2*np.pi), axis=[1])
+    logrd = tf.reduce_mean(logrd, axis=0)
+    loga = -0.5*tf.reduce_sum(A*A + np.log(2*np.pi), axis=[1,2])
+    loga = tf.reduce_mean(loga)
+    logb = -0.5*tf.reduce_sum(B*B + np.log(2*np.pi), [1,2])
+    logb = tf.reduce_mean(logb)
+    logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])
+    logd = tf.reduce_mean(logd)
+
     # Evaluating p(x|z)
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
-    # means = decoder_mean(z,c)
     prec = tf.square(DELTA_inv)
     t = (x-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
@@ -368,7 +390,7 @@ if __name__ == "__main__":
     dual_loss = d_loss_d+d_loss_i
 
     # dual loss for theta
-    dual_loss_theta, label_acc_adv_theta = cal_theta_adv_loss()
+    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A,B,DELTA_inv,n_samples=n_samples)
     
     #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
@@ -376,8 +398,8 @@ if __name__ == "__main__":
 
     # Primal loss
     t1 = -tf.reduce_mean(Td)
-    t2 = x_post_prob_log+logz-logr
-    t3 = tf.reduce_mean(theta_ratio(A,B,DELTA_inv,reuse=True))
+    t2 = x_post_prob_log+logz-logr-logra-logrb-logrd+loga+logb+logd
+    t3 = tf.reduce_mean(q_ratio)
     KL_neg_r_q = t1
     ELBO = t1+t2+t3
     primal_loss = tf.reduce_mean(-ELBO)

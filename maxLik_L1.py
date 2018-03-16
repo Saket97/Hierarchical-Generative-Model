@@ -22,6 +22,7 @@ eps_dim = 40
 eps_nbasis=32
 n_clf_epoch = 5000
 thresh_adv = 0.5
+rank = 20
 
 def load_dataset():
     raw_data = np.load("/opt/data/saket/gene_data/data/mod_total_data.npy")
@@ -62,32 +63,35 @@ def data_network(z, n_layer=1, n_hidden=256, reuse=False):
     #out = tf.Print(out, [out], message="data_net_out")
     return tf.squeeze(out)
 
-def theta_ratio(A, B, Delta_inv, n_layer=1, n_hidden=128, reuse=False):
-    """ A: (N,5000,100) B: (N,5000,7), Delta_inv: (N,5000) """
-    with tf.variable_scope("theta_ratio", reuse=reuse):
-        with tf.variable_scope("A_only", reuse=reuse):
-            a_vec = []
-            for i in range(latent_dim):
-                tmp = tf.squeeze(tf.slice(A,[0,0,i],[-1,-1,1]),axis=2)
-                h = slim.fully_connected(tmp, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 128)
-                a_vec.append(h)
-            A = tf.concat(a_vec, axis=1) # (N,12800)
+def U_ratio(U, n_layer=2, n_hidden=128, reuse=False):
+    """ U:(n_samples, inp_data_dim, rank) """
+    with tf.variable_scope("U", reuse=reuse):
+        U = tf.reshape(U, [-1, inp_data_dim*rank])
+        h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+    return h
 
-        with tf.variable_scope("B_only", reuse=reuse):
-            b_vec = []
-            for i in range(inp_cov_dim):
-                tmp = tf.squeeze(tf.slice(B,[0,0,i],[-1,-1,1]), axis=2)
-                h = slim.fully_connected(tmp, 64, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1)) # (N, 64)
-                b_vec.append(h)
-            B = tf.concat(b_vec, axis=1) # (N,64*7)
+def V_ratio(U, n_layer=2, n_hidden=128, reuse=False):
+    """ U:(n_samples, inp_data_dim, rank) """
+    with tf.variable_scope("V", reuse=reuse):
+        U = tf.reshape(U, [-1, latent_dim*rank])
+        h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+    return h
 
-        with tf.variable_scope("Delta_only", reuse=reuse):
-            h = slim.fully_connected(Delta_inv, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
-        h = tf.concat([A,B,h], axis=1)
-        h = slim.repeat(h, 1, slim.fully_connected, 128, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
-        out = slim.fully_connected(h,1,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
-    #out = tf.Print(out,[out],message="theta_ratio")
-    return out
+def B_ratio(U, n_layer=2, n_hidden=128, reuse=False):
+    """ U:(n_samples, inp_data_dim, rank) """
+    with tf.variable_scope("B", reuse=reuse):
+        U = tf.reshape(U, [-1, inp_data_dim*inp_cov_dim])
+        h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+    return h
+
+def del_ratio(D, n_layer=2, n_hidden=128, reuse=False):
+    with tf.variable_scope("del", reuse=reuse):
+        h = slim.repeat(D,n_layer, slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+    return h
 
 def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
     with tf.variable_scope("Encoder", reuse = reuse):
@@ -135,29 +139,25 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
     with tf.variable_scope("generator",reuse=reuse):
         w = tf.random_normal([n_samples, noise_dim])
         out = slim.fully_connected(w,512,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04)) # (1,1024)
-        a_vec = []
+        u_vec = []
+        v_vec = []
         b_vec = []
+        u = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+        u = tf.reshape(u, [-1,inp_data_dim,rank])
 
-        for i in range(latent_dim):
-            h = slim.fully_connected(out,1024,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
-            h = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01)) # (1,inp_data_dim)
-            a_vec.append(h)
-        
-        for i in range(inp_cov_dim):
-            h = slim.fully_connected(out,1024,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
-            h = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01)) # (1,inp_data_dim)
-            b_vec.append(h)
+        v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        v = slim.fully_connected(u,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))        
+        v = tf.reshape(v,[-1,rank,latent_dim])
+
+        b = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        b = slim.fully_connected(u,inp_data_dim*inp_cov_dim,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+        b = tf.reshape(u, [-1,inp_data_dim,inp_cov_dim])
         
         h = slim.fully_connected(out,1024,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
         del_sample = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
-        a_sam = tf.stack(a_vec,axis=2) # (1,inp_data_dim,latent_dim)
 
-        b_sam = tf.stack(b_vec,axis=2)
-
-    #a_sam = tf.Print(a_sam, [a_sam],message="A generator")
-    #b_sam = tf.Print(b_sam, [b_sam],message="B generator")
-    #del_sample = tf.Print(del_sample, [del_sample],message="del generator")
-    return a_sam,b_sam,del_sample
+    return u,v,b,del_sample
 
 def decoder_mean(z,c, n_hidden=256, n_layers=2, reuse=False):
     """ Convert the linear decoder to non-linerar """
@@ -178,29 +178,56 @@ def classifier(x_input,labels, reuse=False):
 
 def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     # n_samples = 100
-    p_samples_A = tf.random_normal([n_samples, inp_data_dim, latent_dim])
+    p_samples_U = tf.random_normal([n_samples, inp_data_dim, rank])
+    p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
-    q_samples_A, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
-    p_ratio = theta_ratio(p_samples_A, p_samples_B, p_samples_D)
-    q_ratio = theta_ratio(q_samples_A, q_samples_B, q_samples_D, reuse=True)
-    #p_ratio = tf.Print(p_ratio,[p_ratio],message="p_ratio")
-    #q_ratio = tf.Print(q_ratio,[q_ratio],message="q_ratio")
+    q_samples_U, q_samples_V, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
+    
+    p_ratio = U_ratio(p_samples_U)
+    q_ratio = U_ratio(q_samples_U, reuse=True)
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    #d_loss_d = tf.Print(d_loss_d, [d_loss_d], message="d_loss_d")
-    #d_loss_i = tf.Print(d_loss_i, [d_loss_i], message="d_loss_i")
-    dloss = d_loss_d+d_loss_i
-    #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = correct_labels_adv/(2*n_samples)
+    label_acc_adv_u = correct_labels_adv/(2*n_samples)
+    dloss_u = d_loss_d+d_loss_i
+
+    p_ratio = V_ratio(p_samples_V)
+    q_ratio = V_ratio(q_samples_V, reuse=True)
+    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
+    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
+    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    label_acc_adv_v = correct_labels_adv/(2*n_samples)
+    dloss_v = d_loss_d+d_loss_i
+
+    p_ratio = B_ratio(p_samples_B)
+    q_ratio = B_ratio(q_samples_B, reuse=True)
+    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
+    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
+    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    label_acc_adv_b = correct_labels_adv/(2*n_samples)
+    dloss_b = d_loss_d+d_loss_i
+
+    p_ratio = D_ratio(p_samples_D)
+    q_ratio = D_ratio(q_samples_D, reuse=True)
+    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
+    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
+    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    label_acc_adv_d = correct_labels_adv/(2*n_samples)
+    dloss_d = d_loss_d+d_loss_i    
+
+    dloss = dloss_u + dloss_v + dloss_b + dloss_d
+
+    #Adversary Accuracy
+    # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v)/4.0
     return dloss, label_acc_adv_theta, q_ratio
 
 def train(z, closs):
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
     c_vars = [var for var in t_vars if var.name.startswith("Classifier")]
-    tr_vars = [var for var in t_vars if var.name.startswith("theta_ratio")]
+    tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del"))]
     tp_var = [var for var in t_vars if var not in d_vars+c_vars+tr_vars]
     assert(len(tp_var)+len(d_vars)+len(c_vars)+len(tr_vars) == len(t_vars))
     
@@ -221,6 +248,7 @@ def train(z, closs):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
+    A = tf.matmul(U,V)
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv)
     t = (X_test-means)
@@ -324,19 +352,24 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    A,B,DELTA_inv = generator(n_samples=n_samples)
-    A1 = tf.slice(A,[0,0,0],[1,-1,-1])
+    U,V,B,DELTA_inv = generator(n_samples=n_samples)
+    U1 = tf.slice(U,[0,0,0],[1,-1,-1])
+    V1 = tf.slice(V,[0,0,0],[1,-1,-1])
+    A1 = tf.matmul(U1,V1)
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
-    A_mean, A_var = tf.nn.moments(A, axes=0)
-    A_std = tf.sqrt(A_var)
+    U_mean, U_var = tf.nn.moments(U, axes=0)
+    U_std = tf.sqrt(U_var)
+    V_mean, V_var = tf.nn.moments(V, axes=0)
+    V_std = tf.sqrt(V_var)
     B_mean, B_var = tf.nn.moments(B, axes=0)
     B_std = tf.sqrt(B_var)
     D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
     D_std = tf.sqrt(D_var)
 
     #normalising
-    A_norm = (A-A_mean)/(1.0*A_std)
+    U_norm = (U-U_mean)/(1.0*U_std)
+    V_norm = (V-V_mean)/(1.0*V_std)
     B_norm = (B-B_mean)/(1.0*B_std)
     D_norm = (DELTA_inv-D_mean)/(1.0*D_std)
 
@@ -353,15 +386,17 @@ if __name__ == "__main__":
     logz = tf.reduce_mean(logz)
     logr = tf.reduce_mean(logr)
 
-    # reference and prior distribution for theta (A,B,delta)
-    logra = -0.5*tf.reduce_sum(A_norm*A_norm + tf.log(A_var) + np.log(2*np.pi), axis=[1,2])
-    logra = tf.reduce_mean(logra, axis=0)
-    logrb = -0.5*tf.reduce_sum(B_norm*B_norm + tf.log(B_var) + np.log(2*np.pi), axis=[1,2])
-    logrb = tf.reduce_mean(logrb, axis=0)
-    logrd = -0.5*tf.reduce_sum(D_norm*D_norm + tf.log(D_var) + np.log(2*np.pi), axis=[1])
-    logrd = tf.reduce_mean(logrd, axis=0)
-    loga = -0.5*tf.reduce_sum(A*A + np.log(2*np.pi), axis=[1,2])
-    loga = tf.reduce_mean(loga)
+    # # reference and prior distribution for theta (A,B,delta)
+    # logra = -0.5*tf.reduce_sum(A_norm*A_norm + tf.log(A_var) + np.log(2*np.pi), axis=[1,2])
+    # logra = tf.reduce_mean(logra, axis=0)
+    # logrb = -0.5*tf.reduce_sum(B_norm*B_norm + tf.log(B_var) + np.log(2*np.pi), axis=[1,2])
+    # logrb = tf.reduce_mean(logrb, axis=0)
+    # logrd = -0.5*tf.reduce_sum(D_norm*D_norm + tf.log(D_var) + np.log(2*np.pi), axis=[1])
+    # logrd = tf.reduce_mean(logrd, axis=0)
+    logu = -0.5*tf.reduce_sum(U*U + np.log(2*np.pi), axis=[1,2])
+    logu = tf.reduce_mean(logu)
+    logv = -0.5*tf.reduce_sum(V*V + np.log(2*np.pi), axis=[1,2])
+    logv = tf.reduce_mean(logv)    
     logb = -0.5*tf.reduce_sum(B*B + np.log(2*np.pi), [1,2])
     logb = tf.reduce_mean(logb)
     logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])

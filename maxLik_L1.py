@@ -181,7 +181,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     p_samples_A = tf.random_normal([n_samples, inp_data_dim, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
-    # q_samples_A, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
+    q_samples_A, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
     p_ratio = theta_ratio(p_samples_A, p_samples_B, p_samples_D)
     q_ratio = theta_ratio(q_samples_A, q_samples_B, q_samples_D, reuse=True)
     #p_ratio = tf.Print(p_ratio,[p_ratio],message="p_ratio")
@@ -193,7 +193,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     dloss = d_loss_d+d_loss_i
     #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = correct_labels_adv/(2.0*batch_size)
+    label_acc_adv_theta = correct_labels_adv/(2*n_samples)
     return dloss, label_acc_adv_theta, q_ratio
 
 def train(z, closs):
@@ -322,16 +322,19 @@ if __name__ == "__main__":
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
-    
-    n_samples=100
+
+    n_samples=4
     A,B,DELTA_inv = generator(n_samples=n_samples)
+    A1 = tf.slice(A,[0,0,0],[1,-1,-1])
+    B1 = tf.slice(B,[0,0,0],[1,-1,-1])
+    DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
     A_mean, A_var = tf.nn.moments(A, axes=0)
     A_std = tf.sqrt(A_var)
     B_mean, B_var = tf.nn.moments(B, axes=0)
     B_std = tf.sqrt(B_var)
     D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
     D_std = tf.sqrt(D_var)
-    
+
     #normalising
     A_norm = (A-A_mean)/(1.0*A_std)
     B_norm = (B-B_mean)/(1.0*B_std)
@@ -365,8 +368,8 @@ if __name__ == "__main__":
     logd = tf.reduce_mean(logd)
 
     # Evaluating p(x|z)
-    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
-    prec = tf.square(DELTA_inv)
+    means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
+    prec = tf.square(DELTA_inv1)
     t = (x-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
     t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
@@ -380,7 +383,7 @@ if __name__ == "__main__":
     logits, closs = classifier(z,labels,reuse=False)
     correct_label_pred = tf.equal(tf.argmax(logits,1),labels)
     label_acc = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
-    
+
     # Dual loss
     Td = data_network(z_norm)
     Ti = data_network(z_sampled, reuse=True)

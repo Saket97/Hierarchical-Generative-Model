@@ -333,6 +333,14 @@ def train(z, closs, label_acc_adv_theta):
     print("Test Set label Accuracy:", label_acc_)
     test_prob = []
     test_acc = []
+    test_lik_list = []
+    for i in range(250):
+        test_lik = sess.run(x_post_prob_log_test)
+        test_lik_list.append(test_lik)
+    test_lik = tf.stack(test_lik_list, axis=1)
+    test_lik = tf.reduce_mean(test_lik, axis=1)
+    test_lik = tf.reduce_mean(test_lik)
+
     for  i in range(250):
         lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})
         test_prob.append(lt)
@@ -344,7 +352,7 @@ def train(z, closs, label_acc_adv_theta):
     np.save("test_acc.npy",test_acc)
     np.save("test_prob.npy",test_prob)
     print("Average Test Set Accuracy:",avg_test_acc, " :",avg_test_acc1)
-    print("Average test liklihood:"
+    print("Average test likelihood:", test_lik)
 
     for i in range(20):
         z_ = sess.run(z_test)

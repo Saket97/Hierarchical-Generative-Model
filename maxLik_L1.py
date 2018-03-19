@@ -136,7 +136,7 @@ def train(z, closs):
     t2 = 0.5*tf.reduce_sum(tf.log(1e-3+prec))
     t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
     x_post_prob_log_test = t1+t2+t3
-    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test)
+    #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test)
     logits_test, closs_test = classifier(z_test,labels,reuse=True)
     prob_test = tf.nn.softmax(logits_test)
     correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
@@ -150,6 +150,7 @@ def train(z, closs):
     vtp_list = []
     clf_loss_list = []
     post_test_list = []
+    test_lik_list = []
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
@@ -165,6 +166,13 @@ def train(z, closs):
             print("epoch:",i," si:",si_list[-1]," vtp:",vtp_list[-1]," -KL_r_q:",KL_neg_r_q_, " x_post:",x_post_prob_log_," logz:",logz_," logr:",logr_, \
             " d_loss_d:",d_loss_d_, " d_loss_i:",d_loss_i_, " adv_accuracy:",label_acc_adv_, " closs:",closs_," label_acc:",label_acc_)
         if i%1000 == 0:
+            test_lik = []
+            for i in range(250):
+                test_lik_ = sess.run(x_post_prob_log_test)
+                test_lik.append(test_lik_)
+            test_lik = np.stack(test_lik,axis=0)
+            print ("test_lik_shape:",test_lik.shape)
+            test_lik_list.append(np.mean(np.mean(test_lik,axis=0)))
             x_post_test = sess.run(x_post_prob_log_test)
             post_test_list.append(x_post_test)
             print("test set p(x|z):",x_post_test, "Td:",Td_)
@@ -195,7 +203,7 @@ def train(z, closs):
     np.save("B1.npy",B_)
     np.save("delta_inv1.npy",DELTA_inv_)
     np.save("clf_loss_list1.npy",clf_loss_list)
-
+    np.save("test_lik.npy",test_lik_list)
     # Test Set
     z_list = []       
     label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})

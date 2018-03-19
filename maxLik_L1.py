@@ -10,7 +10,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 30000
+nepoch = 35000
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -199,6 +199,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    print("correct_labels_shape:",p_ratio.get_shape().as_list())
     label_acc_adv_v = correct_labels_adv/(2*n_samples)
     dloss_v = d_loss_d+d_loss_i
     label_acc_adv_v = tf.Print(label_acc_adv_v, [label_acc_adv_v], message="label_acc_adv_v")
@@ -256,7 +257,7 @@ def train(z, closs, label_acc_adv_theta):
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
     U_test,V_test,B_test,D_test = generator(n_samples=1000, reuse=True)
     A = tf.matmul(U_test,V_test)
-    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
+    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
     t = (X_test-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
@@ -280,6 +281,7 @@ def train(z, closs, label_acc_adv_theta):
     clf_loss_list = []
     post_test_list = []
     dt_list = []
+    test_lik_list1 = []
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
@@ -296,6 +298,14 @@ def train(z, closs, label_acc_adv_theta):
             print("epoch:",i," si:",si_list[-1]," vtp:",vtp_list[-1]," -KL_r_q:",KL_neg_r_q_, " x_post:",x_post_prob_log_," logz:",logz_," logr:",logr_, \
             " d_loss_d:",d_loss_d_, " d_loss_i:",d_loss_i_, " adv_accuracy:",label_acc_adv_, " closs:",closs_," label_acc:",label_acc_, " theta_dual_loss:",dual_loss_theta_, "label_acc_theta:",label_acc_adv_theta_)
         if i%1000 == 0:
+            test_lik_list = []
+            for i in range(250):
+                test_lik = sess.run(x_post_prob_log_test)
+                test_lik_list.append(test_lik)
+            test_lik = np.stack(test_lik_list, axis=1)
+            test_lik = np.mean(test_lik, axis=1)
+            test_lik = np.mean(test_lik)
+            test_lik_list1.append(test_lik)
             x_post_test = sess.run(x_post_prob_log_test)
             post_test_list.append(x_post_test)
             print("test set p(x|z):",x_post_test, "Td:",Td_)
@@ -322,24 +332,18 @@ def train(z, closs, label_acc_adv_theta):
     np.save("si_loss1.npy", si_list)
     np.save("vtp_loss1.npy", vtp_list)
     np.save("x_post_list1.npy",post_test_list)
-    np.save("A1.npy",A_)
-    np.save("B1.npy",B_)
-    np.save("delta_inv1.npy",DELTA_inv_)
+    np.save("A1.npy",np.mean(A_, axis=0))
+    np.save("B1.npy",np.mean(B_,axis=0))
+    np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
     np.save("clf_loss_list1.npy",clf_loss_list)
     np.save("dloss_theta1.npy",dt_list)
+    np.save("test_lik.npy",test_lik_list1)
     # Test Set
     z_list = []       
     label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})
     print("Test Set label Accuracy:", label_acc_)
     test_prob = []
     test_acc = []
-    test_lik_list = []
-    for i in range(250):
-        test_lik = sess.run(x_post_prob_log_test)
-        test_lik_list.append(test_lik)
-    test_lik = tf.stack(test_lik_list, axis=1)
-    test_lik = tf.reduce_mean(test_lik, axis=1)
-    test_lik = tf.reduce_mean(test_lik)
 
     for  i in range(250):
         lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})

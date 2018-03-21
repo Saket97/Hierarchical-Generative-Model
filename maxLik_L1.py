@@ -61,19 +61,19 @@ def gumble_softmax_sample(logits, temperature):
     return tf.nn.softmax(y/temperature)
 
 def gumbel_softmax(logits, temperature, hard=False):
-     """Sample from the Gumbel-Softmax distribution and optionally discretize.
-       Args:
-           logits: [batch_size, n_class] unnormalized log-probs
-           temperature: non-negative scalar
-           hard: if True, take argmax, but differentiate w.r.t. soft sample y
-     Returns:
-         [batch_size, n_class] sample from the Gumbel-Softmax distribution.
-         If hard=True, then the returned sample will be one-hot, otherwise it will
-         be a probabilitiy distribution that sums to 1 across classes
-   """
+    """Sample from the Gumbel-Softmax distribution and optionally discretize.
+        Args:
+            logits: [batch_size, n_class] unnormalized log-probs
+            temperature: non-negative scalar
+            hard: if True, take argmax, but differentiate w.r.t. soft sample y
+        Returns:
+            [batch_size, n_class] sample from the Gumbel-Softmax distribution.
+            If hard=True, then the returned sample will be one-hot, otherwise it will
+            be a probabilitiy distribution that sums to 1 across classes
+    """
 
-   y = gumble_softmax_sample(logits, temperature)
-   return y
+    y = gumble_softmax_sample(logits, temperature)
+    return y
 
 def standard_normal(shape, **kwargs):
     """Create a standard Normal StochasticTensor."""
@@ -116,6 +116,14 @@ def D_ratio(D, n_layer=2, n_hidden=128, reuse=False):
     with tf.variable_scope("del", reuse=reuse):
         h = slim.repeat(D,n_layer, slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+    return h
+
+def M_ratio(M, n_layer=2, n_hidden=128, reuse=False):
+    with tf.variable_scope("M", reuse=reuse):
+        M = tf.reshape(M, [-1, inp_data_dim*latent_dim])
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.05))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
+        h = tf.Print(M,[M],message="M ratio network output...")
     return h
 
 def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
@@ -164,26 +172,38 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
     with tf.variable_scope("generator",reuse=reuse):
         w = tf.random_normal([n_samples, noise_dim])
         out = slim.fully_connected(w,512,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04)) # (1,1024)
-        u_vec = []
-        v_vec = []
-        b_vec = []
+
         u = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
         u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
-        u = tf.reshape(u, [-1,inp_data_dim,rank])
+        U = tf.reshape(u, [-1,inp_data_dim,rank])
 
         v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
         v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))        
-        v = tf.reshape(v,[-1,rank,latent_dim])
+        V = tf.reshape(v,[-1,rank,latent_dim])
         print("V in generator:",v.get_shape().as_list())
 
         b = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
         b = slim.fully_connected(b,inp_data_dim*inp_cov_dim,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
-        b = tf.reshape(b, [-1,inp_data_dim,inp_cov_dim])
+        B = tf.reshape(b, [-1,inp_data_dim,inp_cov_dim])
         
         h = slim.fully_connected(out,1024,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
         del_sample = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
 
-    return u,v,b,del_sample
+        # Sample M
+        u = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+        U_gumbel = tf.reshape(u, [-1,inp_data_dim,rank])
+
+        v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))        
+        V_gumbel = tf.reshape(v,[-1,rank,latent_dim])
+
+        t = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        t = slim.fully_connected(t,1,activation_fn=tf.sigmoid,weights_regularizer=slim.l2_regularizer(0.1))
+        logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,1,2]) #(nsamples,inp_data_dim,latent_dim)
+        M = gumbel_softmax(logits_gumbel, t)
+
+    return U,V,B,del_sample,M
 
 def decoder_mean(z,c, n_hidden=256, n_layers=2, reuse=False):
     """ Convert the linear decoder to non-linerar """
@@ -208,8 +228,11 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
-    q_samples_U, q_samples_V, q_samples_B, q_samples_D = generator(n_samples=n_samples, reuse=True)
+    p_samples_M = gumbel_softmax(tf.ones([n_samples, inp_data_dim, latent_dim]), 0.5)
+    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M = generator(n_samples=n_samples, reuse=True)
     
+    q_ratio_final = 0
+
     p_ratio = U_ratio(p_samples_U)
     q_ratio = U_ratio(q_samples_U, reuse=True)
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
@@ -218,6 +241,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_u = correct_labels_adv/(2*n_samples)
     label_acc_adv_u = tf.Print(label_acc_adv_u, [label_acc_adv_u], message="label_acc_adv_u")
     dloss_u = d_loss_d+d_loss_i
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = V_ratio(p_samples_V)
     q_ratio = V_ratio(q_samples_V, reuse=True)
@@ -228,6 +252,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_v = correct_labels_adv/(2*n_samples)
     dloss_v = d_loss_d+d_loss_i
     label_acc_adv_v = tf.Print(label_acc_adv_v, [label_acc_adv_v], message="label_acc_adv_v")
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = B_ratio(p_samples_B)
     q_ratio = B_ratio(q_samples_B, reuse=True)
@@ -237,6 +262,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_b = correct_labels_adv/(2*n_samples)
     label_acc_adv_b = tf.Print(label_acc_adv_b, [label_acc_adv_b], message="label_acc_adv_b")
     dloss_b = d_loss_d+d_loss_i
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = D_ratio(p_samples_D)
     q_ratio = D_ratio(q_samples_D, reuse=True)
@@ -246,14 +272,25 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_d = correct_labels_adv/(2*n_samples)
     label_acc_adv_d = tf.Print(label_acc_adv_d, [label_acc_adv_d], message="label_acc_adv_d")
     dloss_d = d_loss_d+d_loss_i
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
-    dloss = dloss_u + dloss_v + dloss_b + dloss_d
+    p_ratio = M_ratio(p_samples_M)
+    q_ratio = M_ratio(q_samples_M, reuse=True)
+    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
+    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
+    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
+    label_acc_adv_m = correct_labels_adv/(2*n_samples)
+    label_acc_adv_m = tf.Print(label_acc_adv_b, [label_acc_adv_b], message="label_acc_adv_b")
+    dloss_m = d_loss_d+d_loss_i
+    q_ratio_m += tf.reduce_mean(q_ratio)
+
+    dloss = dloss_u + dloss_v + dloss_b + dloss_d + dloss_m
 
     #Adversary Accuracy
     # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v)/4.0
+    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m)/5.0
     label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")
-    return dloss, label_acc_adv_theta, q_ratio
+    return dloss, label_acc_adv_theta, q_ratio_m
 
 def train(z, closs, label_acc_adv_theta):
     t_vars = tf.trainable_variables()
@@ -280,8 +317,9 @@ def train(z, closs, label_acc_adv_theta):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    U_test,V_test,B_test,D_test = generator(n_samples=1000, reuse=True)
+    U_test,V_test,B_test,D_test,M_test = generator(n_samples=1000, reuse=True)
     A = tf.matmul(U_test,V_test)
+    A = A*M
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
     t = (X_test-means)
@@ -397,10 +435,12 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    U,V,B,DELTA_inv = generator(n_samples=n_samples)
+    U,V,B,DELTA_inv,M = generator(n_samples=n_samples)
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
+    M1 = tf.slice(M,[0,0,0],[1,-1,-1])
     A1 = tf.matmul(U1,V1)
+    A1 = A1*M1
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
     U_mean, U_var = tf.nn.moments(U, axes=0)
@@ -481,7 +521,7 @@ if __name__ == "__main__":
     # Primal loss
     t1 = -tf.reduce_mean(Td)
     t2 = x_post_prob_log+logz-logr
-    t3 = tf.reduce_mean(q_ratio)
+    t3 = q_ratio
     KL_neg_r_q = t1
     ELBO = t1+t2+t3
     primal_loss = tf.reduce_mean(-ELBO)

@@ -25,26 +25,24 @@ def gumbel_softmax(logits, temperature, hard=False):
     """
 
     y = gumble_softmax_sample(logits, temperature)
+    y = tf.Print(y,[y])
     return y
 
 t = [0.1,0.2,0.5,0.8,1.5,1.8,3,4.5,6,10]
-l = np.ones((5000,1),dtype=np.float32)
-logits = tf.placeholder(dtype=tf.float32,shape=(5000,1))
+l = np.ones((1,2),dtype=np.float32)
+logits = tf.placeholder(dtype=tf.float32,shape=(1,2))
 temp = tf.placeholder(dtype=tf.float32,shape=())
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 out_list = []
 out = gumbel_softmax(logits,temp)
+out = tf.transpose(out)
 for i in range(len(t)):
     out_ = sess.run(out,feed_dict={logits:l,temp:t[i]})
+    print(out_)
     plt.figure()
     plt.hist(out_, bins=30)
     plt.savefig("g%f.png"%t[i])
     plt.close()
     out_list.append(out_)
 
-out = np.array(out_list)
-plt.figure()
-plt.boxplot(np.squeeze(out))
-plt.savefig("gumbel.png")
-plt.close()

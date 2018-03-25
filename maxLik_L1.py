@@ -230,7 +230,7 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         u = slim.fully_connected(u,inp_data_dim*rank*2,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01))
         U_gumbel = tf.reshape(u, [-1,2,inp_data_dim,rank])
 
-        v = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=1.0))
+        v = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.01))
         v = slim.fully_connected(v,latent_dim*rank*2,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01))        
         V_gumbel = tf.reshape(v,[-1,2,rank,latent_dim])
 
@@ -238,7 +238,7 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         #t = slim.fully_connected(t,1,activation_fn=tf.sigmoid,weights_regularizer=slim.l2_regularizer(0.001), weights_initializer=tf.orthogonal_initializer(gain=1.0))
         #t = tf.Print(t,[t],message="Temperature...")
         #variable_summaries(t, name="Temperature")
-        t = tf.constant(0.5, dtype=tf.float32,shape=[n_samples,1,1])
+        t = tf.constant(0.1, dtype=tf.float32,shape=[n_samples,1,1])
         logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,2,3,1]) #(nsamples,inp_data_dim,latent_dim,2)
         #logits_gumbel = tf.Print(logits_gumbel,[logits_gumbel],message="logits_gumbel")
         variable_summaries(logits_gumbel,name="logits_gumbel")
@@ -349,7 +349,7 @@ def train(z, closs, label_acc_adv_theta):
     r_loss = tf.losses.get_regularization_loss()
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss -= r_loss_clf
-    primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
+    primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-5, use_locking=True, beta1=0.5)
     dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)

@@ -12,8 +12,8 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=40
-nepoch =3000
+latent_dim=60
+nepoch = 5000
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -208,12 +208,12 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         w = tf.random_normal([n_samples, noise_dim], mean=0, stddev=1.0)
         out = slim.fully_connected(w,512,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04)) # (1,1024)
 
-        u = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04), weights_initializer=tf.orthogonal_initializer(gain=2.0))
-        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.01), weights_initializer = tf.orthogonal_initializer(gain=2.0))
+        u = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.01))
         U = tf.reshape(u, [-1,inp_data_dim,rank])
         variable_summaries(U, name="U_generator")
-        v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04), weights_initializer=tf.orthogonal_initializer(gain=2.0))
-        v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=2.0))        
+        v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.04))
+        v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.01))        
         V = tf.reshape(v,[-1,rank,latent_dim])
         print("V in generator:",v.get_shape().as_list())
         variable_summaries(V, name="V_generator")
@@ -227,24 +227,24 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
 
         # Sample M
         u = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=1.0))
-        u = slim.fully_connected(u,inp_data_dim*rank*2,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=1.0))
-        U_gumbel = tf.reshape(u, [-1,2,inp_data_dim,rank])
+        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01))
+        U_gumbel = tf.reshape(u, [-1,inp_data_dim,rank])
 
         v = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=1.0))
-        v = slim.fully_connected(v,latent_dim*rank*2,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01), weights_initializer=tf.orthogonal_initializer(gain=1.0))        
-        V_gumbel = tf.reshape(v,[-1,2,rank,latent_dim])
+        v = slim.fully_connected(v,latent_dim*rank,activation_fn=tf.tanh,weights_regularizer=slim.l2_regularizer(0.01))        
+        V_gumbel = tf.reshape(v,[-1,rank,latent_dim])
 
         #t = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.001), weights_initializer=tf.orthogonal_initializer(gain=1.0))
         #t = slim.fully_connected(t,1,activation_fn=tf.sigmoid,weights_regularizer=slim.l2_regularizer(0.001), weights_initializer=tf.orthogonal_initializer(gain=1.0))
         #t = tf.Print(t,[t],message="Temperature...")
         #variable_summaries(t, name="Temperature")
-        t = tf.constant(1, dtype=tf.float32,shape=[n_samples,1,1])
-        logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,2,3,1]) #(nsamples,inp_data_dim,latent_dim,2)
+        t = tf.constant(2, dtype=tf.float32,shape=[n_samples,1])
+        logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,2,1]) #(nsamples,inp_data_dim,latent_dim,2)
         #logits_gumbel = tf.Print(logits_gumbel,[logits_gumbel],message="logits_gumbel")
         variable_summaries(logits_gumbel,name="logits_gumbel")
         M = gumbel_softmax(logits_gumbel, t)
-        M = tf.squeeze(tf.slice(M, [0,0,0,0],[-1,-1,-1,1]), axis=3)
-        #M = tf.transpose(M,perm=[0,2,1])
+       # M = tf.squeeze(tf.slice(M, [0,0,0,0],[-1,-1,-1,1]), axis=3)
+        M = tf.transpose(M,perm=[0,2,1])
         #M = tf.Print(M,[M],message="M output generator")
         variable_summaries(M,name="M_generator")
     return U,V,B,del_sample,M
@@ -272,8 +272,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
-    p_samples_M = gumbel_softmax(tf.ones([n_samples, inp_data_dim, latent_dim,2]), tf.constant(3, dtype=tf.float32,shape=(n_samples,1,1)))
-    p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
+    p_samples_M = gumbel_softmax(tf.ones([n_samples, inp_data_dim, latent_dim]), tf.constant(2, dtype=tf.float32,shape=(n_samples,1)))
+    #p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
     q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M = generator(n_samples=n_samples, reuse=True)
     variable_summaries(p_samples_M, name="p_samples_M")
     variable_summaries(q_samples_M, name="q_samples_M")

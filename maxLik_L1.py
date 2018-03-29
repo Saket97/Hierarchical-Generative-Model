@@ -12,7 +12,7 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=60
+latent_dim=20
 nepoch = 13001
 lr = 10**(-4)
 batch_size = 160
@@ -123,14 +123,6 @@ def U_ratio(U, n_layer=2, n_hidden=128, reuse=False):
         variable_summaries(h,name="U_ratio")
     return h
 
-def V_ratio(U, n_layer=2, n_hidden=128, reuse=False):
-    """ U:(n_samples, inp_data_dim, rank) """
-    with tf.variable_scope("V", reuse=reuse):
-        U = tf.reshape(U, [-1, latent_dim*rank])
-        h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
-        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
-        variable_summaries(h,name="V_ratio")
-    return h
 
 def B_ratio(U, n_layer=2, n_hidden=128, reuse=False):
     """ U:(n_samples, inp_data_dim, rank) """
@@ -212,12 +204,6 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
         U = tf.reshape(u, [-1,inp_data_dim,rank])
         variable_summaries(U, name="U_generator")
-        v = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.05))
-        v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))        
-        V = tf.reshape(v,[-1,rank,latent_dim])
-        print("V in generator:",v.get_shape().as_list())
-        variable_summaries(V, name="V_generator")
-
         b = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         b = slim.fully_connected(b,inp_data_dim*inp_cov_dim,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
         B = tf.reshape(b, [-1,inp_data_dim,inp_cov_dim])
@@ -248,7 +234,7 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
        # M = tf.transpose(M,perm=[0,2,1])
         #M = tf.Print(M,[M],message="M output generator")
         variable_summaries(M,name="M_generator")
-    return U,V,B,del_sample,M
+    return U,B,del_sample,M
 
 def decoder_mean(z,c, n_hidden=256, n_layers=2, reuse=False):
     """ Convert the linear decoder to non-linerar """
@@ -270,12 +256,11 @@ def classifier(x_input,labels, reuse=False):
 def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     # n_samples = 100
     p_samples_U = tf.random_normal([n_samples, inp_data_dim, rank])
-    p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
     p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
     p_samples_M = gumbel_softmax(tf.ones([n_samples, inp_data_dim, latent_dim,2]), tf.constant(0.01, dtype=tf.float32,shape=(n_samples,1,1)))
     p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
-    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M = generator(n_samples=n_samples, reuse=True)
+    q_samples_U, q_samples_B, q_samples_D, q_samples_M = generator(n_samples=n_samples, reuse=True)
     variable_summaries(p_samples_M, name="p_samples_M")
     variable_summaries(q_samples_M, name="q_samples_M")
     q_ratio_m = 0
@@ -288,17 +273,6 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_u = correct_labels_adv/(2*n_samples)
     label_acc_adv_u = tf.Print(label_acc_adv_u, [label_acc_adv_u], message="label_acc_adv_u")
     dloss_u = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(q_ratio)
-
-    p_ratio = V_ratio(p_samples_V)
-    q_ratio = V_ratio(q_samples_V, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    print("correct_labels_shape:",p_ratio.get_shape().as_list())
-    label_acc_adv_v = correct_labels_adv/(2*n_samples)
-    dloss_v = d_loss_d+d_loss_i
-    label_acc_adv_v = tf.Print(label_acc_adv_v, [label_acc_adv_v], message="label_acc_adv_v")
     q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = B_ratio(p_samples_B)
@@ -331,11 +305,11 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     dloss_m = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
-    dloss = dloss_u + dloss_v + dloss_b + dloss_d + dloss_m
+    dloss = dloss_u + dloss_b + dloss_d + dloss_m
     
     #Adversary Accuracy
     # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m)/5.0
+    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_m)/4.0
     label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")   
     return dloss, label_acc_adv_theta, q_ratio_m
 
@@ -366,8 +340,8 @@ def train(z, closs, label_acc_adv_theta):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    U_test,V_test,B_test,D_test,M_test = generator(n_samples=500, reuse=True)
-    A = tf.matmul(U_test,V_test)
+    U_test,B_test,D_test,M_test = generator(n_samples=500, reuse=True)
+    A = U_test
     A = A*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
@@ -461,7 +435,7 @@ def train(z, closs, label_acc_adv_theta):
     #         z_list.append(train_z)
     
     A_,B_,DELTA_inv_,M_test_ = sess.run([A,B,DELTA_inv, M_test])
-    M_test_ = M_test_[0]
+    M_test_ = np.mean(M_test_,axis=0)
     np.save("si_loss1.npy", si_list)
     np.save("vtp_loss1.npy", vtp_list)
     np.save("x_post_list1.npy",post_test_list)
@@ -507,18 +481,15 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    U,V,B,DELTA_inv,M = generator(n_samples=n_samples)
+    U,B,DELTA_inv,M = generator(n_samples=n_samples)
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
-    V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
-    A1 = tf.matmul(U1,V1)
+    A1 = U1
     A1 = A1*M1
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
     U_mean, U_var = tf.nn.moments(U, axes=0)
     U_std = tf.sqrt(U_var)
-    V_mean, V_var = tf.nn.moments(V, axes=0)
-    V_std = tf.sqrt(V_var)
     B_mean, B_var = tf.nn.moments(B, axes=0)
     B_std = tf.sqrt(B_var)
     D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
@@ -526,7 +497,6 @@ if __name__ == "__main__":
 
     #normalising
     U_norm = (U-U_mean)/(1.0*U_std)
-    V_norm = (V-V_mean)/(1.0*V_std)
     B_norm = (B-B_mean)/(1.0*B_std)
     D_norm = (DELTA_inv-D_mean)/(1.0*D_std)
 
@@ -552,8 +522,6 @@ if __name__ == "__main__":
     # logrd = tf.reduce_mean(logrd, axis=0)
     logu = -0.5*tf.reduce_sum(U*U + np.log(2*np.pi), axis=[1,2])
     logu = tf.reduce_mean(logu)
-    logv = -0.5*tf.reduce_sum(V*V + np.log(2*np.pi), axis=[1,2])
-    logv = tf.reduce_mean(logv)    
     logb = -0.5*tf.reduce_sum(B*B + np.log(2*np.pi), [1,2])
     logb = tf.reduce_mean(logb)
     logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])
@@ -598,7 +566,6 @@ if __name__ == "__main__":
     ELBO = t1+t2+t3
     primal_loss = tf.reduce_mean(-ELBO)
 
-    print("V in main:",V.get_shape().as_list())
     print("U in main:",U.get_shape().as_list())
     print("B in main:",B.get_shape().as_list())
     print("DELTA_inv in main:",DELTA_inv.get_shape().as_list())

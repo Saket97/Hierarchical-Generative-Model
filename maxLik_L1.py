@@ -319,8 +319,8 @@ def train(z, closs, label_acc_adv_theta):
     c_vars = [var for var in t_vars if var.name.startswith("Classifier")]
     tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M"))]
     tp_var = [var for var in t_vars if var not in d_vars+c_vars+tr_vars]
-    print("tp_var:",tp_var)
-    print("tr_var:",tr_vars)
+    #print("tp_var:",tp_var)
+    #print("tr_var:",tr_vars)
     assert(len(tp_var)+len(d_vars)+len(c_vars)+len(tr_vars) == len(t_vars))
     
     r_loss = tf.losses.get_regularization_loss()
@@ -345,14 +345,19 @@ def train(z, closs, label_acc_adv_theta):
     A = A*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
-    t = (X_test-means)
-    t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
-    t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    x_post_prob_log_test = t1+t2+t3
+    #t = (X_test-means)
+    #t1 = t*tf.expand_dims(prec, axis=1)*t
+    #t1 = -0.5*tf.reduce_sum(t1, axis=2)
+    #t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
+    #t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
+    #x_post_prob_log_test = t1+t2+t3
     #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
+
+
+    nb_test = ds.NegativeBinomial(tf.ones((means.get_shape().as_list()[0],means.get_shape().as_list()[1], prec.get_shape().as_list()[1]))*tf.expand_dims(prec,axis=1), logits=means)
+    x_post_prob_log_test = nb_test.log_prob(tf.ones((means.get_shape().as_list()[0],X_test.shape[0],X_test.shape[1]))*X_test)
     x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
+    #x_post_prob_log_test = tf.Print(x_post_prob_log_test,[x_post_prob_log_test],message="x_post_prob_test")
     logits_test, closs_test = classifier(z_test,labels,reuse=True)
     prob_test = tf.nn.softmax(logits_test)
     correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
@@ -530,14 +535,23 @@ if __name__ == "__main__":
     # Evaluating p(x|z)
     means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv1)
-    t = (x-means)
-    t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
-    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
-    t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    x_post_prob_log = t1+t2+t3
+    #t = (x-means)
+    #t1 = t*tf.expand_dims(prec, axis=1)*t
+    #t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
+    #t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
+    #t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
+    #x_post_prob_log = t1+t2+t3
+    #x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
+    #x_post_prob_log = tf.reduce_mean(x_post_prob_log)
+
+    nb = ds.NegativeBinomial(tf.ones((means.get_shape().as_list()[0],means.get_shape().as_list()[1], prec.get_shape().as_list()[1]))*tf.expand_dims(prec,axis=1), logits=means)
+    x_post_prob_log = nb.log_prob(tf.ones((means.get_shape().as_list()[0],x.get_shape().as_list()[0],x.get_shape().as_list()[1]))*x)
     x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
     x_post_prob_log = tf.reduce_mean(x_post_prob_log)
+    #x_post_prob_log = tf.Print(x_post_prob_log,[x_post_prob_log],message="x_post_prob")
+    print("x_post_prob_log_shape:",x_post_prob_log.get_shape().as_list())
+    print("batch_shape:",nb.batch_shape)
+    print("event_shape:",nb.event_shape)
 
     # Classifier
     logits, closs = classifier(z,labels,reuse=False)

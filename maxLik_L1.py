@@ -13,7 +13,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 13001
+nepoch = 7001
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -101,6 +101,10 @@ def gumbel_softmax(logits, temperature, hard=False):
     y = gumble_softmax_sample(logits, temperature)
     return y
 
+def cloglog(x):
+    return 1-tf.exp(-tf.exp(10*x))
+    #return tf.sigmoid(20*x)
+
 def standard_normal(shape, **kwargs):
     """Create a standard Normal StochasticTensor."""
     return tf.cast(st.StochasticTensor(
@@ -151,7 +155,7 @@ def D_ratio(D, n_layer=2, n_hidden=128, reuse=False):
 def M_ratio(M, n_layer=2, n_hidden=128, reuse=False):
     with tf.variable_scope("M", reuse=reuse):
         M = tf.reshape(M, [-1, inp_data_dim*latent_dim])
-       # M = M+tf.random_normal(tf.shape(M))
+        M = M+tf.random_normal(tf.shape(M))
         variable_summaries(M,name="M_ratio_input")
         #M = tf.Print(M,[M],message="M input")
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
@@ -226,27 +230,28 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         del_sample = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
 
         # Sample M
-        u = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.05), weights_initializer=tf.orthogonal_initializer(gain=1.0))
-        u = slim.fully_connected(u,inp_data_dim*rank*2,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))
-        U_gumbel = tf.reshape(u, [-1,2,inp_data_dim,rank])
+        u = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.005), weights_initializer=tf.orthogonal_initializer(gain=1))
+        u = slim.fully_connected(u,inp_data_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.005))
+        U_gumbel = tf.reshape(u, [-1,inp_data_dim,rank])
 
-        v = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.05), weights_initializer=tf.orthogonal_initializer(gain=1.0))
-        v = slim.fully_connected(v,latent_dim*rank*2,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.05))        
-        V_gumbel = tf.reshape(v,[-1,2,rank,latent_dim])
+        v = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.005), weights_initializer=tf.orthogonal_initializer(gain=1))
+        v = slim.fully_connected(v,latent_dim*rank,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.005))
+        V_gumbel = tf.reshape(v,[-1,rank,latent_dim])
 
         #t = slim.fully_connected(out, 256, activation_fn=lrelu, weights_regularizer=slim.l2_regularizer(0.001), weights_initializer=tf.orthogonal_initializer(gain=1.0))
         #t = slim.fully_connected(t,1,activation_fn=tf.sigmoid,weights_regularizer=slim.l2_regularizer(0.001), weights_initializer=tf.orthogonal_initializer(gain=1.0))
         #t = tf.Print(t,[t],message="Temperature...")
         #variable_summaries(t, name="Temperature")
         #t = tf.reshape(t,[-1,1,1])
-        t = tf.constant(0.5, dtype=tf.float32,shape=[n_samples,1,1])
-        logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,2,3,1]) #(nsamples,inp_data_dim,latent_dim,2)
+        #t = tf.constant(0.5, dtype=tf.float32,shape=[n_samples,1,1])
+        logits_gumbel = tf.transpose(tf.matmul(U_gumbel,V_gumbel),perm=[0,1,2]) #(nsamples,inp_data_dim,latent_dim,2)
         #logits_gumbel = tf.Print(logits_gumbel,[logits_gumbel],message="logits_gumbel")
         variable_summaries(logits_gumbel,name="logits_gumbel")
-        M = gumbel_softmax(logits_gumbel, t)
-        M = tf.squeeze(tf.slice(M, [0,0,0,0],[-1,-1,-1,1]), axis=3)
+        #M = gumbel_softmax(logits_gumbel, t)
+        #M = tf.squeeze(tf.slice(M, [0,0,0,0],[-1,-1,-1,1]), axis=3)
        # M = tf.transpose(M,perm=[0,2,1])
         #M = tf.Print(M,[M],message="M output generator")
+        M = cloglog(logits_gumbel) 
         variable_summaries(M,name="M_generator")
     return U,V,B,del_sample,M
 

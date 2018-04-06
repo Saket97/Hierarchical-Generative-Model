@@ -36,14 +36,16 @@ if tf.gfile.Exists(FLAGS.logdir):
 tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
-    raw_data = np.load("/opt/data/saket/gene_data/data/mod_total_data.npy")
+    raw_data = np.load("/opt/data/saket/gene_data/data/mod_total_data_count.npy")
     cov = np.load("/opt/data/saket/gene_data/data/cov.npy")
     labels = np.load("/opt/data/saket/gene_data/data/data_label.npy")
+    global inp_cov_dim
+    global inp_data_dim
     inp_data_dim = raw_data.shape[1]
     inp_cov_dim = cov.shape[1]
-    m = np.mean(raw_data, axis=0)
-    raw_data = (raw_data-m)/5.0
-    cov = (np.log10(cov+0.1))/5.0
+    # m = np.mean(raw_data, axis=0)
+    # raw_data = (raw_data-m)/5.0
+    # cov = (np.log10(cov+0.1))/5.0
     return raw_data[0:ntrain],cov[0:ntrain],labels[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels[ntrain:]
 
 X_train, C_train, L_train, X_test, C_test, L_test = load_dataset()
@@ -167,6 +169,7 @@ def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
         h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
         #out = tf.Print(out,[out],message="Encoder:out")
+        out = tf.exp(out)
         a_vec = []
         for i in range(eps_nbasis):
             a = slim.fully_connected(h, latent_dim, activation_fn=None, scope='a_%d'%i)
@@ -181,6 +184,7 @@ def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
             with tf.variable_scope("eps_%d"%i):
                 v = slim.repeat(eps[i], 3, slim.fully_connected, 128, activation_fn=tf.nn.elu)
                 v = slim.fully_connected(v,latent_dim,activation_fn=None)
+                v = tf.exp(v)
                 v_vec.append(v)
         
         z = out
@@ -221,6 +225,7 @@ def generator(n_samples=1, noise_dim=100, reuse=False):
         b = slim.fully_connected(out, 256, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         b = slim.fully_connected(b,inp_data_dim*inp_cov_dim,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
         B = tf.reshape(b, [-1,inp_data_dim,inp_cov_dim])
+        B = tf.exp(B)
 
         h = slim.fully_connected(out,1024,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         del_sample = slim.fully_connected(h,inp_data_dim,activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
@@ -271,7 +276,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     # n_samples = 100
     p_samples_U = tf.random_normal([n_samples, inp_data_dim, rank])
     p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
-    p_samples_B = tf.random_normal([n_samples, inp_data_dim, inp_cov_dim])
+    p_samples_B = tf.random_gamma([n_samples, inp_data_dim, inp_cov_dim],1)
     p_samples_D = tf.random_normal([n_samples, inp_data_dim])
     p_samples_M = gumbel_softmax(tf.ones([n_samples, inp_data_dim, latent_dim,2]), tf.constant(0.01, dtype=tf.float32,shape=(n_samples,1,1)))
     p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
@@ -368,17 +373,22 @@ def train(z, closs, label_acc_adv_theta):
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
     U_test,V_test,B_test,D_test,M_test = generator(n_samples=500, reuse=True)
     A = tf.matmul(U_test,V_test)
+    A = tf.exp(A)
     A = A*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
-    t = (X_test-means)
-    t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
-    t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    x_post_prob_log_test = t1+t2+t3
-    #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
-    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
+    # t = (X_test-means)
+    # t1 = t*tf.expand_dims(prec, axis=1)*t
+    # t1 = -0.5*tf.reduce_sum(t1, axis=2)
+    # t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
+    # t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
+    # x_post_prob_log_test = t1+t2+t3
+    # #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
+    # x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
+    means = means+prec
+    x_post_prob_log_test = X_test*tf.log(means)-means-tf.lgamma(X_test+1)
+    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # wrt to theta
+
     logits_test, closs_test = classifier(z_test,labels,reuse=True)
     prob_test = tf.nn.softmax(logits_test)
     correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels)
@@ -511,7 +521,7 @@ if __name__ == "__main__":
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
-    A1 = tf.matmul(U1,V1)
+    A1 = tf.exp(tf.matmul(U1,V1))
     A1 = A1*M1
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
@@ -562,14 +572,18 @@ if __name__ == "__main__":
     # Evaluating p(x|z)
     means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv1)
-    t = (x-means)
-    t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
-    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
-    t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    x_post_prob_log = t1+t2+t3
-    x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
-    x_post_prob_log = tf.reduce_mean(x_post_prob_log)
+    # t = (x-means)
+    # t1 = t*tf.expand_dims(prec, axis=1)*t
+    # t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
+    # t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
+    # t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
+    # x_post_prob_log = t1+t2+t3
+    # x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
+    # x_post_prob_log = tf.reduce_mean(x_post_prob_log)
+    means = means+prec
+    x_post_prob_log = x*tf.log(means)-means-tf.lgamma(x+1)
+    x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0) # wrt to theta
+    x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0) # wrt to q(x)
 
     # Classifier
     logits, closs = classifier(z,labels,reuse=False)

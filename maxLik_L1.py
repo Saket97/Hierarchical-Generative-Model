@@ -165,9 +165,21 @@ def M_ratio(M, n_layer=2, n_hidden=128, reuse=False):
 
 def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
     with tf.variable_scope("Encoder", reuse = reuse):
+        n = tf.norm(x,axis=1,keep_dims=True)
+        #n = tf.reduce_sum(x, axis=1, keep_dims=True)
+        #x = x/(n*1.0)
+        #x = x/(n+1e-5)
+        #x = tf.Print(x,[x],message="x after normalising")
+        #x = tf.contrib.layers.batch_norm(x,is_training=b_train)
+        x_min = tf.reduce_min(x)
+        x_max = tf.reduce_max(x)
+        x = -1 + 2*(x-x_min)/(x_max-x_min)
+        #x = tf.Print(x,[x],message="x after batch normalising")
         h = tf.concat([x,c], axis=1)
-        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
-        out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.5))
+        h = tf.contrib.layers.batch_norm(h,is_training=b_train)
+        out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.5))
+        out = tf.contrib.layers.batch_norm(out,is_training=b_train)
         #out = tf.Print(out,[out],message="Encoder:out")
         out = tf.exp(out)
         a_vec = []
@@ -199,6 +211,7 @@ def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
     #z = tf.Print(z,[z],message="Encoder:z")
     #Ez = tf.Print(Ez,[Ez],message="Ez")
     #Varz = tf.Print(Varz,[Varz],message="Varz")
+    print("z shape:",z.get_shape().as_list())
     return z,Ez,Varz
 
 def generator(n_samples=1, noise_dim=100, reuse=False):
@@ -271,6 +284,11 @@ def classifier(x_input,labels, reuse=False):
         logits = slim.fully_connected(x_input, 3, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
         cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     return logits, tf.reduce_mean(cl_loss)
+
+def C_embed(x, reuse=False):
+    with tf.variable_scope("C_embed", reuse=reuse):
+        h = slim.fully_connected(x, inp_cov_dim, activation_fn=tf.sigmoid, weights_regularizer=slim.l2_regularizer(0.1))
+    return h
 
 def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     # n_samples = 100
@@ -362,20 +380,43 @@ def train(z, closs, label_acc_adv_theta):
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
-    adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
-    adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    primal_grad = primal_optimizer.compute_gradients(primal_loss+5*closs+r_loss+r_loss_clf,var_list=tp_var+c_vars)
+    capped_g_grad = []
+    for grad, var in primal_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad, -0.1, 0.1), var))
+    primal_train_op = primal_optimizer.apply_gradients(capped_g_grad)
+    #primal_train_op = primal_optimizer.minimize(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
+    adv_grad = dual_optimizer.compute_gradients(dual_loss+r_loss,var_list=d_vars)
+    capped_g_grad = []
+    for grad, var in adv_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad, -0.1, 0.1), var))
+    adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
+    #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
+    adv_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta+r_loss,var_list=tr_vars)
+    capped_g_grad = []
+    for grad, var in adv_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad, -0.1, 0.1), var))
+    adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
+    #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
     #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
+    z_test = tf.Print(z_test,[z_test],message="z_test")
     U_test,V_test,B_test,D_test,M_test = generator(n_samples=500, reuse=True)
     A = tf.matmul(U_test,V_test)
     A = tf.exp(A)
     A = A*M_test
-    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
+    X_min = tf.reduce_min(X_test)
+    X_max = tf.reduce_max(X_test)
+    z_test = (z_test+1)*(X_max-X_min)/2.0+X_min
+    A = tf.Print(A,[A],message="A_test")
+    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_embed(C_test,reuse=True),tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
     # t = (X_test-means)
     # t1 = t*tf.expand_dims(prec, axis=1)*t
@@ -385,9 +426,11 @@ def train(z, closs, label_acc_adv_theta):
     # x_post_prob_log_test = t1+t2+t3
     # #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
     # x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
-    means = means+prec
-    x_post_prob_log_test = X_test*tf.log(means)-means-tf.lgamma(X_test+1)
-    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # wrt to theta
+    means = means+tf.expand_dims(prec,axis=1)
+    means = tf.Print(means,[means],message="means test")
+    x_post_prob_log_test = X_test*tf.log(means+1e-5)-means-tf.lgamma(X_test+1)
+    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=2, keep_dims=False) # wrt to theta
+    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0, keep_dims=False) # wrt to theta
 
     logits_test, closs_test = classifier(z_test,labels,reuse=True)
     prob_test = tf.nn.softmax(logits_test)
@@ -413,16 +456,16 @@ def train(z, closs, label_acc_adv_theta):
             cmb = C_train[j*batch_size:(j+1)*batch_size]
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size], b_train:True})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
-            si_loss,vtp_loss,closs_,label_acc_,dloss_theta = sess.run([dual_loss, primal_loss, closs, label_acc, dual_loss_theta], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size], b_train:True})
+            si_loss,vtp_loss,closs_,label_acc_,dloss_theta = sess.run([dual_loss, primal_loss, closs, label_acc, dual_loss_theta], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size], b_train:True})
             si_list.append(si_loss)
             clf_loss_list.append((closs_, label_acc_))
             vtp_list.append(vtp_loss)
             dt_list.append(dloss_theta)
         if i%100 == 0:
-            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb,c:cmb})
+            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb,c:cmb, b_train:True})
             print("epoch:",i," si:",si_list[-1]," vtp:",vtp_list[-1]," -KL_r_q:",KL_neg_r_q_, " x_post:",x_post_prob_log_," logz:",logz_," logr:",logr_, \
             " d_loss_d:",d_loss_d_, " d_loss_i:",d_loss_i_, " adv_accuracy:",label_acc_adv_, " closs:",closs_," label_acc:",label_acc_, " theta_dual_loss:",dual_loss_theta_, "label_acc_theta:",label_acc_adv_theta_)
         if i%500 == 0:
@@ -436,9 +479,9 @@ def train(z, closs, label_acc_adv_theta):
             test_lik_list = []
             test_prob = []
             for i in range(250):
-                test_lik = sess.run(x_post_prob_log_test)
+                test_lik = sess.run(x_post_prob_log_test, feed_dict={b_train:False})
                 test_lik_list.append(test_lik)
-                lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})
+                lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test, b_train:False})
                 test_prob.append(lt)
             avg_test_prob = np.mean(test_prob,axis=0)
             avg_test_acc1 = np.mean((np.argmax(avg_test_prob,axis=1)==L_test))
@@ -448,7 +491,7 @@ def train(z, closs, label_acc_adv_theta):
             test_lik = np.mean(test_lik, axis=1)
             test_lik = np.mean(test_lik)
             test_lik_list1.append(test_lik)
-            x_post_test = sess.run(x_post_prob_log_test)
+            x_post_test = sess.run(x_post_prob_log_test, feed_dict={b_train:False})
             post_test_list.append(x_post_test)
             print("test set p(x|z):",x_post_test, "Td:",Td_)
             path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
@@ -485,13 +528,13 @@ def train(z, closs, label_acc_adv_theta):
     np.save("M1.npy",M_test_)
     # Test Set
     z_list = []       
-    label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test})
+    label_acc_ = sess.run(label_acc_test, feed_dict={labels:L_test, b_train:False})
     print("Test Set label Accuracy:", label_acc_)
     test_prob = []
     test_acc = []
 
     for  i in range(250):
-        lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test})
+        lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test, b_train:False})
         test_prob.append(lt)
         test_acc.append(la)
     avg_test_prob = np.mean(test_prob,axis=0)
@@ -504,7 +547,7 @@ def train(z, closs, label_acc_adv_theta):
     print("Average test likelihood:", test_lik)
 
     for i in range(20):
-        z_ = sess.run(z_test)
+        z_ = sess.run(z_test, feed_dict={b_train:False})
         #print("z_:",z_)
         z_list.append(z_)
     np.save("z_test_list.npy",z_list)
@@ -512,6 +555,7 @@ def train(z, closs, label_acc_adv_theta):
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
+    b_train = tf.placeholder(tf.bool, shape=())
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
@@ -549,7 +593,7 @@ if __name__ == "__main__":
     # z_sampled = R_std*R_sampled+R_mean
     z_norm = (z-1.0*z_mean)/z_std
     logz = get_zlogprob(z, "gauss")
-    logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var) + latent_dim*np.log(2*np.pi), [1])
+    logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var+1e-5) + latent_dim*np.log(2*np.pi), [1])
     logz = tf.reduce_mean(logz)
     logr = tf.reduce_mean(logr)
 
@@ -569,8 +613,14 @@ if __name__ == "__main__":
     logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])
     logd = tf.reduce_mean(logd)
 
+    #z = tf.Print(z,[z],message="z")
+    #A1 = tf.Print(A1,[A1],message="A1")
     # Evaluating p(x|z)
-    means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
+    x_min = tf.reduce_min(x)
+    x_max = tf.reduce_max(x)
+    z=tf.Print(z,[z],message="z")
+    z = (z+1)*(x_max-x_min)/2+x_min
+    means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*C_embed(c),tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv1)
     # t = (x-means)
     # t1 = t*tf.expand_dims(prec, axis=1)*t
@@ -581,10 +631,14 @@ if __name__ == "__main__":
     # x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
     # x_post_prob_log = tf.reduce_mean(x_post_prob_log)
     means = means+prec
-    x_post_prob_log = x*tf.log(means)-means-tf.lgamma(x+1)
-    x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0) # wrt to theta
-    x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0) # wrt to q(x)
-
+    #means = tf.Print(means,[means],message="means")
+    assert_op = tf.Assert(tf.greater(tf.reduce_min(means),0),[means])
+    with tf.control_dependencies([assert_op]):
+        x_post_prob_log = x*tf.log(means+1e-5)-means-tf.lgamma(x+1)
+        x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=2, keep_dims=False) # wrt to inp dim
+        x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0, keep_dims=False) # wrt to theta
+        x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=0, keep_dims=False) # wrt to q(x)
+    #x_post_prob_log = tf.Print(x_post_prob_log,[x_post_prob_log], message="x_post_prob_log")
     # Classifier
     logits, closs = classifier(z,labels,reuse=False)
     correct_label_pred = tf.equal(tf.argmax(logits,1),labels)

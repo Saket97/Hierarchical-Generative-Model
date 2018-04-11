@@ -5,6 +5,7 @@ import math
 import os
 import sys
 import argparse
+from utils import *
 
 slim = tf.contrib.slim
 ds = tf.contrib.distributions
@@ -43,6 +44,11 @@ def load_dataset():
     global inp_data_dim
     inp_data_dim = raw_data.shape[1]
     inp_cov_dim = cov.shape[1]
+    XCL = np.concatenate([raw_data,cov,labels], axis=1)
+    np.random.shuffle(x)
+    raw_data = XCL[:,0:inp_data_dim]
+    cov = XCL[:,inp_data_dim:inp_data_dim+inp_cov_dim]
+    labels = XCL[:,inp_cov_dim+inp_data_dim:]
     # m = np.mean(raw_data, axis=0)
     # raw_data = (raw_data-m)/5.0
     # cov = (np.log10(cov+0.1))/5.0
@@ -54,67 +60,12 @@ C_test = C_test.astype(np.float32)
 
 l1_regulariser = tf.contrib.layers.l1_regularizer(0.05)
 
-def variable_summaries(var, name=None):
-    """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-    with tf.name_scope('summaries'):
-        mean = tf.reduce_mean(var)
-        tf.summary.scalar('%s mean'%name, mean)
-        with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-        tf.summary.scalar('%s stddev'%name, stddev)
-        tf.summary.scalar('%s max'%name, tf.reduce_max(var))
-        tf.summary.scalar('%s min'%name, tf.reduce_min(var))
-        tf.summary.histogram('%s histogram'%name, var)
-
-def get_zlogprob(z, z_dist):
-    if z_dist == "gauss":
-        logprob = -0.5 * tf.reduce_sum(z*z  + np.log(2*np.pi), [1])
-    elif z_dist == "uniform":
-        logprob = 0.
-    else:
-        raise ValueError("Invalid parameter value for `z_dist`.")
-    return logprob
-
-def lrelu(x, leak=0.2, name="lrelu"):
-    """ Leaky relu activation function """
-    return tf.maximum(x, leak*x)
-def sample_gumbel(shape, eps=1e-20):
-    """ Sample from Gumbel(0,1)"""
-    U = tf.random_uniform(shape, minval=0,maxval=1)
-    return -tf.log(-tf.log(U+eps) + eps)
-
-def gumble_softmax_sample(logits, temperature):
-    """ Draw a sample from the Gumbel-Softmax distribution """
-    y = logits + sample_gumbel(tf.shape(logits))
-    return tf.nn.softmax(y/tf.expand_dims(temperature, axis=1))
-
-def gumbel_softmax(logits, temperature, hard=False):
-    """Sample from the Gumbel-Softmax distribution and optionally discretize.
-        Args:
-            logits: [batch_size, n_class] unnormalized log-probs
-            temperature: non-negative scalar
-            hard: if True, take argmax, but differentiate w.r.t. soft sample y
-        Returns:
-            [batch_size, n_class] sample from the Gumbel-Softmax distribution.
-            If hard=True, then the returned sample will be one-hot, otherwise it will
-            be a probabilitiy distribution that sums to 1 across classes
-    """
-
-    y = gumble_softmax_sample(logits, temperature)
-    return y
 
 def standard_normal(shape, **kwargs):
     """Create a standard Normal StochasticTensor."""
     return tf.cast(st.StochasticTensor(
         ds.MultivariateNormalDiag(tf.zeros(shape), tf.ones(shape), **kwargs)),  tf.float32)
 
-def data_network(z, n_layer=1, n_hidden=256, reuse=False):
-    """ Calculates the value of log(r(z_2|x)/q(z_2|x))"""
-    with tf.variable_scope("data_net", reuse = reuse):
-        h = slim.repeat(z, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.01))
-        out = slim.fully_connected(h, 1, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
-    #out = tf.Print(out, [out], message="data_net_out")
-    return tf.squeeze(out)
 
 def U_ratio(U, n_layer=2, n_hidden=128, reuse=False):
     """ U:(n_samples, inp_data_dim, rank) """
@@ -165,21 +116,15 @@ def M_ratio(M, n_layer=2, n_hidden=128, reuse=False):
 
 def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
     with tf.variable_scope("Encoder", reuse = reuse):
-        n = tf.norm(x,axis=1,keep_dims=True)
-        #n = tf.reduce_sum(x, axis=1, keep_dims=True)
-        #x = x/(n*1.0)
-        #x = x/(n+1e-5)
-        #x = tf.Print(x,[x],message="x after normalising")
-        #x = tf.contrib.layers.batch_norm(x,is_training=b_train)
         x_min = tf.reduce_min(x)
         x_max = tf.reduce_max(x)
         x = -1 + 2*(x-x_min)/(x_max-x_min)
         #x = tf.Print(x,[x],message="x after batch normalising")
         h = tf.concat([x,c], axis=1)
         h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.5))
-        h = tf.contrib.layers.batch_norm(h,is_training=b_train)
+        # h = tf.contrib.layers.batch_norm(h,is_training=b_train)
         out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.5))
-        out = tf.contrib.layers.batch_norm(out,is_training=b_train)
+        # out = tf.contrib.layers.batch_norm(out,is_training=b_train)
         #out = tf.Print(out,[out],message="Encoder:out")
         out = tf.exp(out)
         a_vec = []
@@ -418,14 +363,6 @@ def train(z, closs, label_acc_adv_theta):
     A = tf.Print(A,[A],message="A_test")
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_embed(C_test,reuse=True),tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
-    # t = (X_test-means)
-    # t1 = t*tf.expand_dims(prec, axis=1)*t
-    # t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    # t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
-    # t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    # x_post_prob_log_test = t1+t2+t3
-    # #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
-    # x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
     means = means+tf.expand_dims(prec,axis=1)
     means = tf.Print(means,[means],message="means test")
     x_post_prob_log_test = X_test*tf.log(means+1e-5)-means-tf.lgamma(X_test+1)
@@ -496,22 +433,6 @@ def train(z, closs, label_acc_adv_theta):
             print("test set p(x|z):",x_post_test, "Td:",Td_)
             path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
             print("Model saved at ",path)
-    # Training complete
-    # z_list=[]
-    # for i in range(n_clf_epoch):
-    #     tmp = []
-    #     for j in range(ntrain//batch_size):
-    #         xmb = X_train[j*batch_size:(j+1)*batch_size]
-    #         cmb = C_train[j*batch_size:(j+1)*batch_size]
-    #         sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})           
-    #         z_ = sess.run(z, feed_dict={x:xmb,c:cmb})
-    #         cl_loss_, label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size]})
-    #         tmp.append(z_)
-    #     if i%100 == 0:
-    #         print("epoch:",i," closs:",cl_loss_," train_acc:",label_acc_)
-    #     train_z = np.stack(tmp, axis=0)
-    #     if i < 250:
-    #         z_list.append(train_z)
     
     A_,B_,DELTA_inv_,M_test_ = sess.run([A,B,DELTA_inv, M_test])
     M_test_ = M_test_[0]
@@ -569,20 +490,6 @@ if __name__ == "__main__":
     A1 = A1*M1
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
-    U_mean, U_var = tf.nn.moments(U, axes=0)
-    U_std = tf.sqrt(U_var)
-    V_mean, V_var = tf.nn.moments(V, axes=0)
-    V_std = tf.sqrt(V_var)
-    B_mean, B_var = tf.nn.moments(B, axes=0)
-    B_std = tf.sqrt(B_var)
-    D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
-    D_std = tf.sqrt(D_var)
-
-    #normalising
-    U_norm = (U-U_mean)/(1.0*U_std)
-    V_norm = (V-V_mean)/(1.0*V_std)
-    B_norm = (B-B_mean)/(1.0*B_std)
-    D_norm = (DELTA_inv-D_mean)/(1.0*D_std)
 
     # Draw samples from posterior q(z2|x)
     print("Sampling from posterior...")
@@ -597,22 +504,6 @@ if __name__ == "__main__":
     logz = tf.reduce_mean(logz)
     logr = tf.reduce_mean(logr)
 
-    # # reference and prior distribution for theta (A,B,delta)
-    # logra = -0.5*tf.reduce_sum(A_norm*A_norm + tf.log(A_var) + np.log(2*np.pi), axis=[1,2])
-    # logra = tf.reduce_mean(logra, axis=0)
-    # logrb = -0.5*tf.reduce_sum(B_norm*B_norm + tf.log(B_var) + np.log(2*np.pi), axis=[1,2])
-    # logrb = tf.reduce_mean(logrb, axis=0)
-    # logrd = -0.5*tf.reduce_sum(D_norm*D_norm + tf.log(D_var) + np.log(2*np.pi), axis=[1])
-    # logrd = tf.reduce_mean(logrd, axis=0)
-    logu = -0.5*tf.reduce_sum(U*U + np.log(2*np.pi), axis=[1,2])
-    logu = tf.reduce_mean(logu)
-    logv = -0.5*tf.reduce_sum(V*V + np.log(2*np.pi), axis=[1,2])
-    logv = tf.reduce_mean(logv)    
-    logb = -0.5*tf.reduce_sum(B*B + np.log(2*np.pi), [1,2])
-    logb = tf.reduce_mean(logb)
-    logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])
-    logd = tf.reduce_mean(logd)
-
     #z = tf.Print(z,[z],message="z")
     #A1 = tf.Print(A1,[A1],message="A1")
     # Evaluating p(x|z)
@@ -622,14 +513,6 @@ if __name__ == "__main__":
     z = (z+1)*(x_max-x_min)/2+x_min
     means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*C_embed(c),tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)
     prec = tf.square(DELTA_inv1)
-    # t = (x-means)
-    # t1 = t*tf.expand_dims(prec, axis=1)*t
-    # t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
-    # t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1),axis=1) # (n_samples,1)
-    # t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    # x_post_prob_log = t1+t2+t3
-    # x_post_prob_log = tf.reduce_mean(x_post_prob_log, axis=1)
-    # x_post_prob_log = tf.reduce_mean(x_post_prob_log)
     means = means+prec
     #means = tf.Print(means,[means],message="means")
     assert_op = tf.Assert(tf.greater(tf.reduce_min(means),0),[means])
@@ -666,8 +549,4 @@ if __name__ == "__main__":
     ELBO = t1+t2+t3
     primal_loss = tf.reduce_mean(-ELBO)
 
-    print("V in main:",V.get_shape().as_list())
-    print("U in main:",U.get_shape().as_list())
-    print("B in main:",B.get_shape().as_list())
-    print("DELTA_inv in main:",DELTA_inv.get_shape().as_list())
     train(z, closs, label_acc_adv_theta)

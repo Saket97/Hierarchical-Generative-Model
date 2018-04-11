@@ -1,4 +1,9 @@
 import tensorflow as tf
+import numpy as np
+slim = tf.contrib.slim
+ds = tf.contrib.distributions
+st = tf.contrib.bayesflow.stochastic_tensor
+graph_replace = tf.contrib.graph_editor.graph_replace
 
 def variable_summaries(var, name=None):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""

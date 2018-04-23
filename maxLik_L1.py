@@ -209,7 +209,7 @@ def train(z, closs):
             test_lik_list.append(np.mean(np.mean(test_lik,axis=0)))
             x_post_test = sess.run(x_post_prob_log_test)
             post_test_list.append(x_post_test)
-            print("test set p(x|z):",x_post_test, "Td:",Td_)
+            #print("test set p(x|z):",x_post_test, "Td:",Td_)
             path = saver.save(sess,"/opt/data/saket/model.ckpt",i)
             print("Model saved at ",path)
     
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
-    labels_tb = tf.placeholder(tf.int64, shape=())
+    labels_tb = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
     
 

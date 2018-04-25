@@ -129,6 +129,7 @@ def U_ratio(U, n_layer=2, n_hidden=128, reuse=False):
     """ U:(n_samples, inp_data_dim, rank) """
     with tf.variable_scope("U", reuse=reuse):
         U = tf.reshape(U, [-1, inp_data_dim*rank])
+        #U += tf.random_normal(U.get_shape().as_list())
         h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
         variable_summaries(h,name="U_ratio")
@@ -138,6 +139,7 @@ def V_ratio(U, n_layer=2, n_hidden=128, reuse=False):
     """ U:(n_samples, inp_data_dim, rank) """
     with tf.variable_scope("V", reuse=reuse):
         U = tf.reshape(U, [-1, latent_dim*rank])
+        #U += tf.random_normal(U.get_shape().as_list())
         h = slim.repeat(U,n_layer,slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
         variable_summaries(h,name="V_ratio")
@@ -175,6 +177,7 @@ def M_ratio(M, n_layer=2, n_hidden=128, reuse=False):
 def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
     with tf.variable_scope("Encoder", reuse = reuse):
         h = tf.concat([x,c], axis=1)
+        #h += tf.random_normal(h.get_shape().as_list())
         h = slim.repeat(h, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
         out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
         #out = tf.Print(out,[out],message="Encoder:out")
@@ -361,7 +364,7 @@ def train(z, closs, label_acc_adv_theta):
    # dual_optimizer = tf.train.GradientDescentOptimizer(1e-4)
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #dual_optimizer_theta = tf.train.GradientDescentOptimizer(1e-4)
-    #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
+    classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
 
     primal_grad = primal_optimizer.compute_gradients(primal_cons*primal_loss+r_loss+r_loss_clf,var_list=tp_var+c_vars)
@@ -390,7 +393,7 @@ def train(z, closs, label_acc_adv_theta):
             capped_g_grad.append((tf.clip_by_value(grad, -0.05, 0.1), var))
     adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
     #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
-    #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
+    clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph
@@ -453,7 +456,7 @@ def train(z, closs, label_acc_adv_theta):
     f = open("results.txt","a+")
     for k in tmp_cons:
         if k == tmp_cons[0]:
-            nepoch=600
+            nepoch=1001
             
         else:
             saver.restore(sess,"/opt/data/saket/gene_data/model/model.ckpt-249")
@@ -464,6 +467,7 @@ def train(z, closs, label_acc_adv_theta):
                 xmb = X_train[j*batch_size:(j+1)*batch_size]
                 cmb = C_train[j*batch_size:(j+1)*batch_size]
                 # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
+                #xmb += np.random.normal(size=xmb.shape)
                 for gen in range(1):
                     sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],primal_cons:k})
                 for gen in range(1):
@@ -520,6 +524,28 @@ def train(z, closs, label_acc_adv_theta):
         ca = ca/M_test_.shape[0]
         f.write("%f %f %f\n"%(k,avg_test_acc1,ca))
     
+    clf_loss_list = []
+    for i in range(n_clf_epoch):
+        for j in range(ntrain//batch_size):
+            xmb = X_train[j*batch_size:(j+1)*batch_size]
+            cmb = C_train[j*batch_size:(j+1)*batch_size]
+            # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
+            for gen in range(1):
+                sess.run(clf_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],primal_cons:k})
+            closs_,label_acc_ = sess.run([closs, label_acc], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],primal_cons:k})
+            clf_loss_list.append((closs_, label_acc_))
+        if i%100 == 0:
+            print("epoch:%d closs:%f label_acc:%f"%(i,closs_,label_acc_))
+
+        if i%100 == 0:
+            test_prob = []
+            for i in range(250):
+                lt, la = sess.run([prob_test, label_acc_test], feed_dict={labels:L_test,primal_cons:k})
+                test_prob.append(lt)
+            avg_test_prob = np.mean(test_prob,axis=0)
+            avg_test_acc1 = np.mean((np.argmax(avg_test_prob,axis=1)==L_test))
+            print("Average Test Set Accuracy:",avg_test_acc1)
+            test_acc_list.append(avg_test_acc1)
     A_,B_,DELTA_inv_,M_test_ = sess.run([A,B,DELTA_inv, M_test])
     M_test_ = M_test_[0]
     np.save("si_loss1.npy", si_list)

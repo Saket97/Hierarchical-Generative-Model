@@ -5,6 +5,8 @@ import math
 import os
 import sys
 import argparse
+import sklearn.metrics as skm
+import sklearn.preprocessing as skp
 
 slim = tf.contrib.slim
 ds = tf.contrib.distributions
@@ -13,13 +15,13 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 2001
+nepoch = 401
 lr = 10**(-4)
-batch_size = 50
-ntrain = 350
-test_batch_size = 141
-ntest=141
-inp_data_dim = 5000
+batch_size = 150
+ntrain = 300
+test_batch_size = 34
+ntest=34
+inp_data_dim = 4732
 inp_cov_dim = 3
 eps_dim = 40
 eps_nbasis=32
@@ -27,8 +29,9 @@ n_clf_epoch = 5000
 thresh_adv = 0.5
 rank = 30
 num_hiv_classes = 2
-num_tb_classes = 3
-tb_coeff = 5
+num_tb_classes = 2
+tb_coeff = 3
+hiv_coeff = 2
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
@@ -53,11 +56,46 @@ def load_dataset():
     #cov = (np.log10(cov+0.1))/5.0
     return raw_data[0:ntrain],cov[0:ntrain],labels[0:ntrain],labels_tb[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels[ntrain:],labels_tb[ntrain:]
 
-X_train, C_train, L_train, Ltb_train, X_test, C_test, L_test, Ltb_test = load_dataset()
+X_train, C_train, L_train, Ltb_train, X_test, C_test, L_test, Ltb_test1 = load_dataset()
+print("inp_data_dim:",inp_data_dim)
+print("inp_cov_dim:",inp_cov_dim)
 X_test = X_test.astype(np.float32)
 C_test = C_test.astype(np.float32)
+n1 = (Ltb_test1==1).nonzero()[0].shape[0]
+n0 = (Ltb_test1==0).nonzero()[0].shape[0]
+n2 = (Ltb_test1==2).nonzero()[0].shape[0]
+print("Input: For ","Tb"," #1:",n1," #0:",n0, " #2:",n2)
+Lac_test = np.copy(Ltb_test1)
+Ltb_test = np.copy(Ltb_test1)
+Lla_test = np.copy(Ltb_test1)
+i2 = (Ltb_test==2).nonzero()[0]
+i1 = (Ltb_test==1).nonzero()[0]
+i0 = (Ltb_test==0).nonzero()[0]
+Ltb_test[i2] = 1
+i2 = (Lac_test==2).nonzero()[0]
+i1 = (Lac_test==1).nonzero()[0]
+i0 = (Lac_test==0).nonzero()[0]
+Lac_test[i1] = 0
+Lac_test[i2] = 1
+i2 = (Lla_test==2).nonzero()[0]
+i1 = (Lla_test==1).nonzero()[0]
+i0 = (Lla_test==0).nonzero()[0]
+Lla_test[i2] = 0
 
+n1 = (Ltb_test==1).nonzero()[0].shape[0]
+n0 = (Ltb_test==0).nonzero()[0].shape[0]
+print("Input: For ","Tb"," #1:",n1," #0:",n0)
+
+n1 = (Lac_test==1).nonzero()[0].shape[0]
+n0 = (Lac_test==0).nonzero()[0].shape[0]
+print("Input: For ","AC"," #1:",n1," #0:",n0)
+
+n1 = (Lla_test==1).nonzero()[0].shape[0]
+n0 = (Lla_test==0).nonzero()[0].shape[0]
+print("Input: For ","La"," #1:",n1," #0:",n0)
 l1_regulariser = tf.contrib.layers.l1_regularizer(0.05)
+lb = skp.LabelBinarizer()
+lb.fit([0,1])
 
 def variable_summaries(var, name=None):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
@@ -283,7 +321,24 @@ def classifier(x_input,labels, reuse=False):
 def classifier_tb(x_input,labels, reuse=False):
     with tf.variable_scope("Classifier_tb", reuse=reuse):
         #h = slim.fully_connected(x_input, 128, activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
-        logits = slim.fully_connected(x_input, num_tb_classes, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.5), weights_initializer=tf.truncated_normal_initializer)
+        x_input += tf.random_normal(x_input.get_shape().as_list())
+        logits = slim.fully_connected(x_input, 2, activation_fn=None, weights_regularizer=slim.l2_regularizer(1.0), weights_initializer=tf.truncated_normal_initializer)
+        cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+    return logits, tf.reduce_mean(cl_loss)
+
+def classifier_active_tb(x_input,labels, reuse=False):
+    with tf.variable_scope("Classifier_active_tb", reuse=reuse):
+        #h = slim.fully_connected(x_input, 128, activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
+        x_input += tf.random_normal(x_input.get_shape().as_list())
+        logits = slim.fully_connected(x_input, 2, activation_fn=None, weights_regularizer=slim.l2_regularizer(1.0), weights_initializer=tf.truncated_normal_initializer)
+        cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+    return logits, tf.reduce_mean(cl_loss)
+
+def classifier_latent_tb(x_input,labels, reuse=False):
+    with tf.variable_scope("Classifier_latent_tb", reuse=reuse):
+        #h = slim.fully_connected(x_input, 128, activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.1))
+        x_input += tf.random_normal(x_input.get_shape().as_list())
+        logits = slim.fully_connected(x_input,2, activation_fn=None, weights_regularizer=slim.l2_regularizer(1.0), weights_initializer=tf.truncated_normal_initializer)
         cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     return logits, tf.reduce_mean(cl_loss)
 
@@ -359,10 +414,19 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, n_samples = 100):
     label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")   
     return dloss, label_acc_adv_theta, q_ratio_m
 
+def countN1(out_prob, orig, name):
+    pred = np.argmax(out_prob,axis=1)
+    n1 = (pred==1).nonzero()[0].shape[0]
+    n0 = (pred==0).nonzero()[0].shape[0]
+    print("Pred: For ",name," #1:",n1," #0:",n0)
+    n1 = (orig==1).nonzero()[0].shape[0]
+    n0 = (orig==0).nonzero()[0].shape[0]
+    print("Input: For ",name," #1:",n1," #0:",n0)
+
 def train(z, closs, label_acc_adv_theta):
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
-    c_vars = [var for var in t_vars if var.name.startswith("Classifier") or var.name.startswith("Classifier_tb")]
+    c_vars = [var for var in t_vars if var.name.startswith("Classifier") or var.name.startswith("Classifier_tb") or var.name.startswith("Classifier_active_tb") or var.name.startswith("Classifier_latent_tb")]
     tmp = [var for var in t_vars if var.name.startswith("Classifier_tb")]
     print("TB Classifier Variable:",tmp)
     tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M"))]
@@ -411,8 +475,18 @@ def train(z, closs, label_acc_adv_theta):
     correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels_tb)
     label_acc_test2 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
-    closs_test = closs_test1+closs_test2
-    label_acc_test = (label_acc_test1+label_acc_test2)/2.0
+    logits_test, closs_test3 = classifier_active_tb(z_test,labels_active,reuse=True)
+    prob_test3 = tf.nn.softmax(logits_test)
+    correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels_active)
+    label_acc_test3 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+
+    logits_test, closs_test4 = classifier_latent_tb(z_test,labels_latent,reuse=True)
+    prob_test4 = tf.nn.softmax(logits_test)
+    correct_label_pred_test = tf.equal(tf.argmax(logits_test,1),labels_latent)
+    label_acc_test4 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+
+    closs_test = closs_test1+closs_test2+closs_test3+closs_test4
+    label_acc_test = (label_acc_test1+label_acc_test2+label_acc_test3+label_acc_test4)/4.0
     
     saver = tf.train.Saver()
     merged = tf.summary.merge_all()
@@ -427,23 +501,33 @@ def train(z, closs, label_acc_adv_theta):
     dt_list = []
     test_lik_list1 = []
     test_acc_list = []
+    auc=[]
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             cmb = C_train[j*batch_size:(j+1)*batch_size]
+            ltbmb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+            i2 = (ltbmb == 2).nonzero()[0]
+            ltbmb[i2] = 1
+            lacmb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+            i1 = (lacmb == 1).nonzero()[0]
+            lacmb[i1] = 0
+            i2 = (lacmb == 2).nonzero()[0]
+            lacmb[i2] = 1
+            llamb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+            i2 = (llamb == 2).nonzero()[0]
+            llamb[i2] = 0
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:Ltb_train[j*batch_size:(j+1)*batch_size]})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:Ltb_train[j*batch_size:(j+1)*batch_size]})
-            si_loss,vtp_loss,closs_,closstb_,label_acc_,dloss_theta,label_hiv,label_tb = sess.run([dual_loss, primal_loss, closs1, closs2, label_acc, dual_loss_theta, label_acc1,label_acc2], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:Ltb_train[j*batch_size:(j+1)*batch_size]})
-            si_list.append(si_loss)
-            clf_loss_list.append((closs_, closstb_,label_acc_))
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
+            vtp_loss,closs_,closstb_,clossac_,clossla_,label_hiv,label_tb,label_active,label_latent = sess.run([primal_loss, closs1, closs2, closs3, closs4, label_acc1,label_acc2,label_acc3,label_acc4], feed_dict={x:xmb,c:cmb,labels:L_train[j*batch_size:(j+1)*batch_size],labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
+            clf_loss_list.append((closs_, closstb_,clossac_,clossla_))
             vtp_list.append(vtp_loss)
-            dt_list.append(dloss_theta)
         if i%100 == 0:
             Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb,c:cmb})
-            print("epoch:",i," si:",si_list[-1]," vtp:",vtp_list[-1]," -KL_r_q:",KL_neg_r_q_, " x_post:",x_post_prob_log_," adv_accuracy:",label_acc_adv_, " closs:",closs_," label_acc_hiv:",label_hiv," label_acc_tb:",label_tb, " theta_dual_loss:",dual_loss_theta_, "label_acc_theta:",label_acc_adv_theta_)
+            print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_," label_acc_hiv:",label_hiv," label_acc_tb:",label_tb, " label_acc_active:",label_active, " label_acc_latent:",label_latent)
         if i%500 == 0:
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()
@@ -455,18 +539,59 @@ def train(z, closs, label_acc_adv_theta):
             test_lik_list = []
             test_prob_hiv = []
             test_prob_tb = []
+            test_prob_ac = []
+            test_prob_la = []
+            test_acc_tb = []
             for i in range(100):
                 test_lik = sess.run(x_post_prob_log_test)
                 test_lik_list.append(test_lik)
-                lt_hiv,lt_tb, la, la_hiv, la_tb = sess.run([prob_test1, prob_test2, label_acc_test, label_acc_test1, label_acc_test2], feed_dict={labels:L_test,labels_tb:Ltb_test})
+                lt_hiv,lt_tb,lt_ac,lt_la, la, la_hiv, la_tb = sess.run([prob_test1, prob_test2,prob_test3,prob_test4, label_acc_test, label_acc_test1, label_acc_test2], feed_dict={labels:L_test,labels_tb:Ltb_test, labels_active:Lac_test,labels_latent:Lla_test})
                 test_prob_hiv.append(lt_hiv)
                 test_prob_tb.append(lt_tb)
+                test_prob_ac.append(lt_ac)
+                test_prob_la.append(lt_la)
+                test_acc_tb.append(la_tb)
             avg_test_prob_hiv = np.mean(test_prob_hiv,axis=0)
             avg_test_prob_tb = np.mean(test_prob_tb,axis=0)
+            #print("avg_test_prob_tb:",avg_test_prob_tb)
+            #print("Ltb_test:",Ltb_test)
+            avg_acc_tb_tmp = np.mean(test_acc_tb)
+            print("tmp tb acc:",avg_acc_tb_tmp)
+            avg_test_prob_ac = np.mean(test_prob_ac,axis=0)
+            avg_test_prob_la = np.mean(test_prob_la,axis=0)
             avg_test_acc_hiv = np.mean((np.argmax(avg_test_prob_hiv,axis=1)==L_test))
             avg_test_acc_tb = np.mean((np.argmax(avg_test_prob_tb,axis=1)==Ltb_test))
+            avg_test_acc_ac = np.mean((np.argmax(avg_test_prob_ac,axis=1)==Lac_test))
+            avg_test_acc_la = np.mean((np.argmax(avg_test_prob_la,axis=1)==Lla_test))
             print("Average Test Set Accuracy HIV:",avg_test_acc_hiv)
             print("Average Test Set Accuracy TB:",avg_test_acc_tb)
+            print("Average Test Set Accuracy Active TB:",avg_test_acc_ac)
+            print("Average Test Set Accuracy Latent TB:",avg_test_acc_la)
+            countN1(avg_test_prob_tb,Ltb_test,"Tb")
+            countN1(avg_test_prob_ac,Lac_test,"Active Tb")
+            countN1(avg_test_prob_la,Lla_test,"Latent Tb")
+            tmp = np.zeros((L_test.shape[0],2))
+            #print("L_test dtype:",L_test.dtype)
+            t = L_test.astype(np.int32)
+            tmp[np.arange(L_test.shape[0]),t] = 1
+            print("tmp shape:",tmp.shape)
+            auc_hiv = skm.roc_auc_score(tmp,avg_test_prob_hiv)
+            print("AUC HIV vs others:",auc_hiv)
+            tmp = np.zeros((L_test.shape[0],2))
+            t = Ltb_test.astype(np.int32)
+            tmp[np.arange(L_test.shape[0]),t] = 1
+            auc_tb = skm.roc_auc_score(tmp,avg_test_prob_tb)
+            print("AUC TB vs others:",auc_tb)
+            tmp = np.zeros((L_test.shape[0],2))
+            t = Lac_test.astype(np.int32)
+            tmp[np.arange(L_test.shape[0]),t] = 1
+            auc_ac = skm.roc_auc_score(tmp,avg_test_prob_ac)
+            print("AUC Active TB vs others:",auc_ac)
+            tmp = np.zeros((L_test.shape[0],2))
+            t = Lla_test.astype(np.int32)
+            tmp[np.arange(L_test.shape[0]),t] = 1
+            auc_la = skm.roc_auc_score(tmp,avg_test_prob_la)
+            print("AUC Latent TB vs others:",auc_la)
             test_acc_list.append((avg_test_acc_hiv,avg_test_acc_tb))
             test_lik = np.stack(test_lik_list, axis=1)
             test_lik = np.mean(test_lik, axis=1)
@@ -474,43 +599,47 @@ def train(z, closs, label_acc_adv_theta):
             test_lik_list1.append(test_lik)
             path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
             print("Model saved at ",path)
+            auc.append([auc_hiv,auc_tb,auc_ac,auc_la])
     
     # Save the summary data for analysis
     A_,B_,DELTA_inv_,M_test_ = sess.run([A,B,DELTA_inv, M_test])
     M_test_ = M_test_[0]
-    np.save("si_loss1.npy", si_list)
     np.save("vtp_loss1.npy", vtp_list)
     #np.save("x_post_list1.npy",post_test_list)
     np.save("A1.npy",np.mean(A_, axis=0))
     np.save("B1.npy",np.mean(B_,axis=0))
     np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
     np.save("clf_loss_list1.npy",clf_loss_list)
-    np.save("dloss_theta1.npy",dt_list)
     np.save("test_lik.npy",test_lik_list1)
     np.save("test_acc.npy",test_acc_list)
     np.save("M1.npy",M_test_)
+    np.save("auc.npy",auc)
 
     # Test Set
     z_list = []       
+    test_lik_list = []
     test_prob_hiv = []
     test_prob_tb = []
-    test_acc_hiv = []
-    test_acc_tb = []
-
-    for  i in range(250):
-        lt_hiv, lt_tb, la, la_hiv, la_tb = sess.run([prob_test1,prob_test2, label_acc_test, label_acc_test1, label_acc_test2], feed_dict={labels:L_test,labels_tb:Ltb_test})
+    test_prob_ac = []
+    test_prob_la = []
+    for i in range(100):
+        lt_hiv,lt_tb,lt_ac,lt_la, la, la_hiv, la_tb = sess.run([prob_test1, prob_test2,prob_test3,prob_test4, label_acc_test, label_acc_test1, label_acc_test2], feed_dict={labels:L_test,labels_tb:Ltb_test, labels_active:Lac_test,labels_latent:Lla_test})
         test_prob_hiv.append(lt_hiv)
-        test_prob_tb.append(lt_tb)
-        test_acc_hiv.append(la_hiv)
-        test_acc_tb.append(la_tb)
-
+        test_prob_tb.append([lt_tb])
+        test_prob_ac.append([lt_ac])
+        test_prob_la.append([lt_la])
     avg_test_prob_hiv = np.mean(test_prob_hiv,axis=0)
-    avg_test_prob_tb = np.mean(test_prob_tb, axis=0)
+    avg_test_prob_tb = np.mean(test_prob_tb,axis=0)
+    avg_test_prob_ac = np.mean(test_prob_ac,axis=0)
+    avg_test_prob_la = np.mean(test_prob_la,axis=0)
     avg_test_acc_hiv = np.mean((np.argmax(avg_test_prob_hiv,axis=1)==L_test))
     avg_test_acc_tb = np.mean((np.argmax(avg_test_prob_tb,axis=1)==Ltb_test))
+    avg_test_acc_ac = np.mean((np.argmax(avg_test_prob_ac,axis=1)==Lac_test))
+    avg_test_acc_la = np.mean((np.argmax(avg_test_prob_la,axis=1)==Lla_test))
     print("Average Test Set Accuracy HIV:",avg_test_acc_hiv)
     print("Average Test Set Accuracy TB:",avg_test_acc_tb)
-    print("Average test likelihood:", test_lik)
+    print("Average Test Set Accuracy Active TB:",avg_test_acc_ac)
+    print("Average Test Set Accuracy Latent TB:",avg_test_acc_la)
 
     for i in range(20):
         z_ = sess.run(z_test)
@@ -524,6 +653,8 @@ if __name__ == "__main__":
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
     labels_tb = tf.placeholder(tf.int64, shape=(None))
+    labels_active = tf.placeholder(tf.int64, shape=(None))
+    labels_latent = tf.placeholder(tf.int64, shape=(None))
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
@@ -601,8 +732,17 @@ if __name__ == "__main__":
     correct_label_pred = tf.equal(tf.argmax(logits,1),labels_tb)
     label_acc2 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    closs = closs1+tb_coeff*closs2
-    label_acc = (label_acc1+label_acc2)/2.0
+    logits, closs3 = classifier_active_tb(z,labels_active,reuse=False)
+    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_active)
+    #correct_label_pred = tf.Print(correct_label_pred,[correct_label_pred],message="Avtive pred train")
+    label_acc3 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+
+    logits, closs4 = classifier_latent_tb(z,labels_latent,reuse=False)
+    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_latent)
+    label_acc4 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+
+    closs = hiv_coeff*closs1+tb_coeff*(closs2+closs3+closs4)
+    label_acc = (label_acc1+label_acc2+label_acc3+label_acc4)/4.0
 
     # Dual loss
     Td = data_network(z_norm)

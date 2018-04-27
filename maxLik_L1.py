@@ -15,7 +15,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 401
+nepoch = 1001
 lr = 10**(-4)
 batch_size = 150
 ntrain = 300
@@ -30,7 +30,7 @@ thresh_adv = 0.5
 rank = 30
 num_hiv_classes = 2
 num_tb_classes = 2
-tb_coeff = 3
+tb_coeff = 4
 hiv_coeff = 2
 """ tensorboard """
 parser = argparse.ArgumentParser()

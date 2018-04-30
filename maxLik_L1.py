@@ -32,8 +32,8 @@ thresh_adv = 0.5
 rank = 30
 num_hiv_classes = 2
 num_tb_classes = 2
-tb_coeff = 4
-hiv_coeff = 2
+tb_coeff = 20
+hiv_coeff = 20
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
@@ -139,8 +139,6 @@ def train(z, closs, label_acc_adv_theta):
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
     c_vars = [var for var in t_vars if var.name.startswith("Classifier") or var.name.startswith("Classifier_tb") or var.name.startswith("Classifier_active_tb") or var.name.startswith("Classifier_latent_tb")]
-    tmp = [var for var in t_vars if var.name.startswith("Classifier_tb")]
-    print("TB Classifier Variable:",tmp)
     tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M") or var.name.startswith("Mtb") or var.name.startswith("Mactive") or var.name.startswith("Mlatent") or var.name.startswith("Mhiv") or var.name.startswith("Wtb") or var.name.startswith("Wactive") or var.name.startswith("Wlatent") or var.name.startswith("Whiv"))]
     tp_var = [var for var in t_vars if var not in d_vars+c_vars+tr_vars]
     #print("tp_var:",tp_var)
@@ -311,8 +309,12 @@ def train(z, closs, label_acc_adv_theta):
             auc.append([auc_hiv,auc_tb,auc_ac,auc_la])
     
     # Save the summary data for analysis
-    A_,B_,DELTA_inv_,M_test_ = sess.run([A,B,DELTA_inv, M_test])
+    A_,B_,DELTA_inv_,M_test_,Mtb_test_, Mactive_test_,Mlatent_test_,Mhiv_test_ = sess.run([A,B,DELTA_inv, M_test,Mtb_test, Mactive_test,Mlatent_test,Mhiv_test])
     M_test_ = M_test_[0]
+    Mtb_test_ = Mtb_test_[0]
+    Mactive_test_ = Mactive_test_[0]
+    Mlatent_test_ = Mlatent_test_[0]
+    Mhiv_test_ = Mhiv_test_[0]
     np.save("vtp_loss1.npy", vtp_list)
     #np.save("x_post_list1.npy",post_test_list)
     np.save("A1.npy",np.mean(A_, axis=0))
@@ -323,6 +325,10 @@ def train(z, closs, label_acc_adv_theta):
     np.save("test_acc.npy",test_acc_list)
     np.save("M1.npy",M_test_)
     np.save("auc.npy",auc)
+    np.save("Mtb.npy",Mtb_test_)
+    np.save("Mactive.npy",Mactive_test_)
+    np.save("Mlatent.npy",Mlatent_test_)
+    np.save("Mhiv.npy",Mhiv_test_)
 
     # Test Set
     z_list = []       
@@ -383,21 +389,8 @@ if __name__ == "__main__":
     W_active = tf.slice(W_active,[0,0],[1,-1])
     W_latent = tf.slice(W_latent,[0,0],[1,-1])
     W_hiv = tf.slice(W_hiv,[0,0],[1,-1])
-
-    #normalising
-    U_mean, U_var = tf.nn.moments(U, axes=0)
-    U_std = tf.sqrt(U_var)
-    V_mean, V_var = tf.nn.moments(V, axes=0)
-    V_std = tf.sqrt(V_var)
-    B_mean, B_var = tf.nn.moments(B, axes=0)
-    B_std = tf.sqrt(B_var)
-    D_mean, D_var = tf.nn.moments(DELTA_inv, axes = 0)
-    D_std = tf.sqrt(D_var)
-
-    U_norm = (U-U_mean)/(1.0*U_std)
-    V_norm = (V-V_mean)/(1.0*V_std)
-    B_norm = (B-B_mean)/(1.0*B_std)
-    D_norm = (DELTA_inv-D_mean)/(1.0*D_std)
+    #M_tb = tf.Print(M_tb,[M_tb],message="M_tb")
+    #print("W_tb_shape:",W_tb.get_shape().as_list())
 
     # Draw samples from posterior q(z2|x)
     print("Sampling from posterior...")
@@ -411,22 +404,6 @@ if __name__ == "__main__":
     logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var) + latent_dim*np.log(2*np.pi), [1])
     logz = tf.reduce_mean(logz)
     logr = tf.reduce_mean(logr)
-
-    # # reference and prior distribution for theta (A,B,delta)
-    # logra = -0.5*tf.reduce_sum(A_norm*A_norm + tf.log(A_var) + np.log(2*np.pi), axis=[1,2])
-    # logra = tf.reduce_mean(logra, axis=0)
-    # logrb = -0.5*tf.reduce_sum(B_norm*B_norm + tf.log(B_var) + np.log(2*np.pi), axis=[1,2])
-    # logrb = tf.reduce_mean(logrb, axis=0)
-    # logrd = -0.5*tf.reduce_sum(D_norm*D_norm + tf.log(D_var) + np.log(2*np.pi), axis=[1])
-    # logrd = tf.reduce_mean(logrd, axis=0)
-    logu = -0.5*tf.reduce_sum(U*U + np.log(2*np.pi), axis=[1,2])
-    logu = tf.reduce_mean(logu)
-    logv = -0.5*tf.reduce_sum(V*V + np.log(2*np.pi), axis=[1,2])
-    logv = tf.reduce_mean(logv)    
-    logb = -0.5*tf.reduce_sum(B*B + np.log(2*np.pi), [1,2])
-    logb = tf.reduce_mean(logb)
-    logd = -0.5*tf.reduce_sum(DELTA_inv*DELTA_inv + np.log(2*np.pi), [1])
-    logd = tf.reduce_mean(logd)
 
     # Evaluating p(x|z)
     means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))+tf.matmul(tf.ones([B1.get_shape().as_list()[0],c.get_shape().as_list()[0],inp_cov_dim])*c,tf.transpose(B1, perm=[0,2,1])) # (N,100) (n_samples,5000,100)

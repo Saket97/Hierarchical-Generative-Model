@@ -9,6 +9,46 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 thresh_adv = 0.5
 
+def generate_classifier(latent_dim, n_samples,reuse=False):
+    with tf.variable_scope("generate_classifier",reuse=reuse):
+        w = tf.random_normal([n_samples, latent_dim//2], mean=0, stddev=1.0)
+        out = slim.fully_connected(w,32,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.05)) # (1,1024)
+        # Sample Classifier
+        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
+        t = tf.constant(0.1, dtype=tf.float32, shape=[n_samples,1])
+        M_tb = gumbel_softmax(logits_gumbel,t)
+        M_tb = tf.squeeze(tf.slice(M_tb,[0,0,0],[-1,-1,1]),axis=2)
+
+        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
+        M_active = gumbel_softmax(logits_gumbel,t)
+        M_active = tf.squeeze(tf.slice(M_active,[0,0,0],[-1,-1,1]),axis=2)
+
+        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
+        M_latent = gumbel_softmax(logits_gumbel,t)
+        M_latent = tf.squeeze(tf.slice(M_latent,[0,0,0],[-1,-1,1]),axis=2)
+
+        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
+        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
+        M_hiv = gumbel_softmax(logits_gumbel,t)
+        M_hiv = tf.squeeze(tf.slice(M_hiv,[0,0,0],[-1,-1,1]),axis=2)
+
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
+        W_tb = slim.fully_connected(h,latent_dim,activation_fn = None)
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
+        W_active = slim.fully_connected(h,latent_dim,activation_fn = None)
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
+        W_latent = slim.fully_connected(h,latent_dim,activation_fn = None)
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
+        W_hiv = slim.fully_connected(h,latent_dim,activation_fn = None)
+    return M_tb,M_active,M_latent,M_hiv,W_tb,W_active,W_latent,W_hiv
+
 def generator(inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples=1, noise_dim=100, reuse=False):
     """ Generate samples for A,B and DELTA 
         Returns:
@@ -61,41 +101,8 @@ def generator(inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples=1, noise_di
         #M = tf.Print(M,[M],message="M output generator")
         #M = cloglog(logits_gumbel)
         variable_summaries(M,name="M_generator")
-        
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        t = tf.constant(0.1, dtype=tf.float32, shape=[n_samples,1])
-        M_tb = gumbel_softmax(logits_gumbel,t)
-        M_tb = tf.squeeze(tf.slice(M_tb,[0,0,0],[-1,-1,1]),axis=2)
-
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_active = gumbel_softmax(logits_gumbel,t)
-        M_active = tf.squeeze(tf.slice(M_active,[0,0,0],[-1,-1,1]),axis=2)
-
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_latent = gumbel_softmax(logits_gumbel,t)
-        M_latent = tf.squeeze(tf.slice(M_latent,[0,0,0],[-1,-1,1]),axis=2)
-
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_hiv = gumbel_softmax(logits_gumbel,t)
-        M_hiv = tf.squeeze(tf.slice(M_hiv,[0,0,0],[-1,-1,1]),axis=2)
-
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
-        W_tb = slim.fully_connected(h,latent_dim,activation_fn = None)
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
-        W_active = slim.fully_connected(h,latent_dim,activation_fn = None)
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
-        W_latent = slim.fully_connected(h,latent_dim,activation_fn = None)
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu)
-        W_hiv = slim.fully_connected(h,latent_dim,activation_fn = None)
-    return U,V,B,del_sample,M,M_latent,M_active,M_tb,M_hiv,W_tb,W_active,W_latent,W_hiv
+        M_tb,M_active,M_latent,M_hiv,W_tb,W_active,W_latent,W_hiv=generate_classifier(latent_dim,n_samples,reuse=reuse)
+    return U,V,B,del_sample,M,M_tb,M_active,M_latent,M_hiv,W_tb,W_active,W_latent,W_hiv
 
 def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples = 100):
     # n_samples = 100
@@ -179,8 +186,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_mtb")
+    label_acc_adv_mtb = correct_labels_adv/(2*n_samples)
+    label_acc_adv_mtb = tf.Print(label_acc_adv_mtb, [label_acc_adv_mtb], message="label_acc_adv_mtb")
     dloss_mtb = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -189,8 +196,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_mactive")
+    label_acc_adv_mactive = correct_labels_adv/(2*n_samples)
+    label_acc_adv_mactive = tf.Print(label_acc_adv_mactive, [label_acc_adv_mactive], message="label_acc_adv_mactive")
     dloss_mactive = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -199,8 +206,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_mlatent")
+    label_acc_adv_mlatent = correct_labels_adv/(2*n_samples)
+    label_acc_adv_mlatent = tf.Print(label_acc_adv_mlatent, [label_acc_adv_mlatent], message="label_acc_adv_mlatent")
     dloss_mlatent = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -209,8 +216,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_mhiv")
+    label_acc_adv_mhiv = correct_labels_adv/(2*n_samples)
+    label_acc_adv_mhiv = tf.Print(label_acc_adv_mhiv, [label_acc_adv_mhiv], message="label_acc_adv_mhiv")
     dloss_mhiv = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -219,18 +226,18 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_wtb")
+    label_acc_adv_wtb = correct_labels_adv/(2*n_samples)
+    label_acc_adv_wtb = tf.Print(label_acc_adv_wtb, [label_acc_adv_wtb], message="label_acc_adv_wtb")
     dloss_wtb = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Wactive_ratio(p_samples_W_active)
-    q_ratio = Mtb_ratio(q_samples_W_active, reuse=True)
+    q_ratio = Wactive_ratio(q_samples_W_active, reuse=True)
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_wactive")
+    label_acc_adv_wactive = correct_labels_adv/(2*n_samples)
+    label_acc_adv_wactive = tf.Print(label_acc_adv_wactive, [label_acc_adv_wactive], message="label_acc_adv_wactive")
     dloss_wactive = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -239,8 +246,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_wlatent")
+    label_acc_adv_wlatent = correct_labels_adv/(2*n_samples)
+    label_acc_adv_wlatent = tf.Print(label_acc_adv_wlatent, [label_acc_adv_wlatent], message="label_acc_adv_wlatent")
     dloss_wlatent = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
@@ -249,16 +256,16 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_m = correct_labels_adv/(2*n_samples)
-    label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_whiv")
+    label_acc_adv_whiv = correct_labels_adv/(2*n_samples)
+    label_acc_adv_whiv = tf.Print(label_acc_adv_whiv, [label_acc_adv_whiv], message="label_acc_adv_whiv")
     dloss_whiv = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
-    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+dloss_mtb+dloss_mactive+dloss_mlatent+dloss_mhiv+dloss_wtb+dloss_wactive+dloss_wlatent+dloss_whiv
+    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+5*(dloss_mtb+dloss_mactive+dloss_mlatent+dloss_mhiv)+dloss_wtb+dloss_wactive+dloss_wlatent+dloss_whiv
     
     #Adversary Accuracy
     # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m)/5.0
+    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m+label_acc_adv_mtb+label_acc_adv_mactive+label_acc_adv_mlatent+label_acc_adv_mhiv+label_acc_adv_wtb+label_acc_adv_wactive+label_acc_adv_wlatent+label_acc_adv_whiv)/13.0
     label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")   
     return dloss, label_acc_adv_theta, q_ratio_m
 
@@ -274,49 +281,53 @@ def countN1(out_prob, orig, name):
 
 def classifier(x_input,labels,W,M, reuse=False):
     with tf.variable_scope("Classifier", reuse=reuse):
+        b = tf.get_variable("bias",shape=[1],dtype=tf.float32)
         W = W*M
-        logits = tf.matmul(x_input,W,transpose_b=True) # (N,latent_dim)(latent_dim,n_samples) = (N,n_samples)
+        logits = tf.matmul(x_input,W,transpose_b=True)+b # (N,latent_dim)(latent_dim,n_samples) = (N,n_samples)
         #logits = slim.fully_connected(x_input, num_hiv_classes, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
         probs = tf.sigmoid(logits) # (N,n_samples)
         loss = tf.expand_dims(tf.cast(labels,tf.float32),axis=1)*tf.log(probs+1e-5) + tf.expand_dims(1-tf.cast(labels,tf.float32),axis=1)*tf.log(1-probs+1e-5)
         #cl_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
         cl_loss = tf.reduce_mean(loss,axis=1,keep_dims=False)
         cl_loss = -tf.reduce_mean(cl_loss)
-    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), tf.reduce_mean(cl_loss)
+    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), cl_loss
 
 def classifier_tb(x_input,labels,W,M, reuse=False):
     with tf.variable_scope("Classifier_tb", reuse=reuse):
-        x_input += tf.random_normal(x_input.get_shape().as_list())
+        #x_input += tf.random_normal(x_input.get_shape().as_list())
+        b = tf.get_variable("bias",shape=[1],dtype=tf.float32)
         W = W*M
         labels = tf.cast(labels,tf.float32)
-        logits = tf.matmul(x_input,W,transpose_b=True)
+        logits = tf.matmul(x_input,W,transpose_b=True)+b
         probs = tf.sigmoid(logits) # (N,n_samples)
         loss = tf.expand_dims(labels,axis=1)*tf.log(probs+1e-5) + tf.expand_dims(1-labels,axis=1)*tf.log(1-probs+1e-5)
         cl_loss = tf.reduce_mean(loss,axis=1,keep_dims=False)
         cl_loss = -tf.reduce_mean(cl_loss)
-    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), tf.reduce_mean(cl_loss)
+    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), cl_loss
 
 def classifier_active_tb(x_input,labels,W,M, reuse=False):
     with tf.variable_scope("Classifier_active_tb", reuse=reuse):
-        x_input += tf.random_normal(x_input.get_shape().as_list())
+        #x_input += tf.random_normal(x_input.get_shape().as_list())
+        b = tf.get_variable("bias",shape=[1],dtype=tf.float32)
         W = W*M
         labels = tf.cast(labels,tf.float32)
-        logits = tf.matmul(x_input,W,transpose_b=True)
+        logits = tf.matmul(x_input,W,transpose_b=True)+b
         probs = tf.sigmoid(logits) # (N,n_samples)
         loss = tf.expand_dims(labels,axis=1)*tf.log(probs+1e-5) + tf.expand_dims(1-labels,axis=1)*tf.log(1-probs+1e-5)
         cl_loss = tf.reduce_mean(loss,axis=1,keep_dims=False)
         cl_loss = -tf.reduce_mean(cl_loss)
-    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), tf.reduce_mean(cl_loss)
+    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), cl_loss
 
 def classifier_latent_tb(x_input,labels, W,M,reuse=False):
     with tf.variable_scope("Classifier_latent_tb", reuse=reuse):
-        x_input += tf.random_normal(x_input.get_shape().as_list())
+        #x_input += tf.random_normal(x_input.get_shape().as_list())
+        b = tf.get_variable("bias",shape=[1],dtype=tf.float32)
         W = W*M
         labels = tf.cast(labels,tf.float32)
-        logits = tf.matmul(x_input,W,transpose_b=True)
+        logits = tf.matmul(x_input,W,transpose_b=True)+b
         probs = tf.sigmoid(logits) # (N,n_samples)
         loss = tf.expand_dims(labels,axis=1)*tf.log(probs+1e-5) + tf.expand_dims(1-labels,axis=1)*tf.log(1-probs+1e-5)
         cl_loss = tf.reduce_mean(loss,axis=1,keep_dims=False)
         cl_loss = -tf.reduce_mean(cl_loss)
-    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), tf.reduce_mean(cl_loss)
+    return tf.reduce_mean(tf.stack([1-probs,probs],axis=2),axis=1,keep_dims=False), cl_loss
 

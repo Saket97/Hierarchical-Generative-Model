@@ -17,7 +17,9 @@ def generate_classifier(latent_dim, n_samples,reuse=False):
         logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
         logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
         logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        t = tf.constant(0.1, dtype=tf.float32, shape=[n_samples,1])
+        #logits_gumbel = tf.Print(logits_gumbel,[logits_gumbel],message="logits gumbel tb")
+        variable_summaries(logits_gumbel,name="logits_gumbel Mtb")
+        t = tf.constant(0.001, dtype=tf.float32, shape=[n_samples,1])
         M_tb = gumbel_softmax(logits_gumbel,t)
         M_tb = tf.squeeze(tf.slice(M_tb,[0,0,0],[-1,-1,1]),axis=2)
 
@@ -189,7 +191,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mtb = correct_labels_adv/(2*n_samples)
     label_acc_adv_mtb = tf.Print(label_acc_adv_mtb, [label_acc_adv_mtb], message="label_acc_adv_mtb")
     dloss_mtb = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(q_ratio)
+    q_ratio_m += 40*tf.reduce_mean(q_ratio)
 
     p_ratio = Mactive_ratio(p_samples_Mactive)
     q_ratio = Mactive_ratio(q_samples_Mactive, reuse=True)
@@ -261,7 +263,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     dloss_whiv = d_loss_d+d_loss_i
     q_ratio_m += tf.reduce_mean(q_ratio)
 
-    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+5*(dloss_mtb+dloss_mactive+dloss_mlatent+dloss_mhiv)+dloss_wtb+dloss_wactive+dloss_wlatent+dloss_whiv
+    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+30*(dloss_mtb+dloss_mactive+dloss_mlatent+dloss_mhiv)+dloss_wtb+dloss_wactive+dloss_wlatent+dloss_whiv
     
     #Adversary Accuracy
     # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))

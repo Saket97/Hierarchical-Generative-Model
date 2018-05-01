@@ -32,8 +32,8 @@ thresh_adv = 0.5
 rank = 30
 num_hiv_classes = 2
 num_tb_classes = 2
-tb_coeff = 20
-hiv_coeff = 20
+tb_coeff = 40
+hiv_coeff = 30
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')

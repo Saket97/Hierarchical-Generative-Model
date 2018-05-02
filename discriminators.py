@@ -6,6 +6,11 @@ ds = tf.contrib.distributions
 st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
+def switch(x):
+    return (tf.sign(x)+1)//2
+
+def f(x):
+    return switch(5-x)*tf.abs(x) + switch(x-5+1e-10)*(5+tf.log(tf.abs(x-4)+1e-10))
 
 def variable_summaries(var, name=None):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""

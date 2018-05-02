@@ -32,7 +32,7 @@ thresh_adv = 0.5
 rank = 20
 num_hiv_classes = 2
 num_tb_classes = 2
-tb_coeff = 30
+tb_coeff = 80
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
@@ -114,14 +114,14 @@ def encoder(x,c, eps=None, n_layer=1, n_hidden=128, reuse=False):
 
         if eps == None:
             eps = tf.random_normal(tf.stack([eps_nbasis, batch_size, eps_dim]))
-        
+
         v_vec = []
         for i in range(eps_nbasis):
             with tf.variable_scope("eps_%d"%i):
                 v = slim.repeat(eps[i], 3, slim.fully_connected, 128, activation_fn=tf.nn.elu)
                 v = slim.fully_connected(v,latent_dim,activation_fn=None)
                 v_vec.append(v)
-        
+
         z = out
         Ez = out
         Varz = 0.0
@@ -145,7 +145,7 @@ def train(z, closs, label_acc_adv_theta):
     #print("tp_var:",tp_var)
     #print("tr_var:",tr_vars)
     assert(len(tp_var)+len(d_vars)+len(c_vars)+len(tr_vars) == len(t_vars))
-    
+
     r_loss = tf.losses.get_regularization_loss()
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss -= r_loss_clf
@@ -159,7 +159,7 @@ def train(z, closs, label_acc_adv_theta):
     adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
     #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
-    
+
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
@@ -191,7 +191,7 @@ def train(z, closs, label_acc_adv_theta):
 
     closs_test =closs_test2+closs_test3+closs_test4
     label_acc_test = (label_acc_test2+label_acc_test3+label_acc_test4)/3.0
-    
+
     saver = tf.train.Saver()
     merged = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(FLAGS.logdir, graph = tf.get_default_graph())
@@ -206,7 +206,10 @@ def train(z, closs, label_acc_adv_theta):
     test_lik_list1 = []
     test_acc_list = []
     auc=[]
+    val = 1
     for i in range(nepoch):
+        if i > 50:
+            val = 0
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             cmb = C_train[j*batch_size:(j+1)*batch_size]
@@ -223,14 +226,14 @@ def train(z, closs, label_acc_adv_theta):
             llamb[i2] = 0
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:0, pearson:1})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:0, pearson:1})
             vtp_loss,closs_,closstb_,clossac_,clossla_,label_tb,label_active,label_latent = sess.run([primal_loss, closs, closs2, closs3, closs4,label_acc2,label_acc3,label_acc4], feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
             clf_loss_list.append((closs_, closstb_,clossac_,clossla_))
             vtp_list.append(vtp_loss)
         if i%100 == 0:
-            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb,c:cmb})
+            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_,f_input_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta,f_input], feed_dict={x:xmb,c:cmb})
             print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_," label_acc_tb:",label_tb, " label_acc_active:",label_active, " label_acc_latent:",label_latent, " logr:",logr_," logz:",logz_)
         if i%500 == 0:
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -345,6 +348,8 @@ if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     keep_prob = tf.placeholder_with_default(1.0,())
+    reverse_kl = tf.placeholder_with_default(0.0,())
+    pearson = tf.placeholder_with_default(1.0,())
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels_tb = tf.placeholder(tf.int64, shape=(None))
     labels_active = tf.placeholder(tf.int64, shape=(None))
@@ -413,14 +418,14 @@ if __name__ == "__main__":
     label_acc = (label_acc2+label_acc3+label_acc4)/3.0
 
     # Dual loss
-    Td = data_network(z_norm)
+    Td = data_network(z)
     Ti = data_network(z_sampled, reuse=True)
     d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Td, labels=tf.ones_like(Td)))
     d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Ti, labels=tf.zeros_like(Ti)))
     dual_loss = d_loss_d+d_loss_i
 
     # dual loss for theta
-    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,B,DELTA_inv,inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob)
+    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,B,DELTA_inv,inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob,n_samples=batch_size)
 
     #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
@@ -428,10 +433,15 @@ if __name__ == "__main__":
 
     # Primal loss
     t1 = -tf.reduce_mean(Td)
-    t2 = x_post_prob_log+logz-logr
-    t3 = q_ratio
+    t2 = x_post_prob_log
+    t3 = tf.reduce_mean(q_ratio)
+    f_input = tf.squeeze(q_ratio)-Td
+    f_input = tf.exp(f_input)
+    print("f_input_shape:",f_input.get_shape().as_list())
+    t4 = tf.reduce_mean(tf.square(f_input-1))
+    t4 = tf.reduce_mean(f(f_input-1))
     KL_neg_r_q = t1
-    ELBO = t1+t2+t3
+    ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3)
     primal_loss = tf.reduce_mean(-ELBO)
 
     print("V in main:",V.get_shape().as_list())

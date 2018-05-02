@@ -42,9 +42,9 @@ if tf.gfile.Exists(FLAGS.logdir):
 tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
-    raw_data = np.load("/opt/data/saket/gene_data/data/mod_total_data.npy")
-    cov = np.load("/opt/data/saket/gene_data/data/cov.npy")
-    labels_tb = np.load("/opt/data/saket/gene_data/data/data_label.npy")
+    raw_data = np.load("data/mod_total_data.npy")
+    cov = np.load("data/cov.npy")
+    labels_tb = np.load("data/data_label.npy")
     labels_tb = np.squeeze(labels_tb)
     global inp_data_dim
     global inp_cov_dim
@@ -163,7 +163,7 @@ def train(z, closs, label_acc_adv_theta):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    U_test,V_test,B_test,D_test,M_test,Mtb_test, Mactive_test,Mlatent_test,W_tb_test,W_active_test,W_latent_test = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,n_samples=500, reuse=True)
+    U_test,V_test,B_test,D_test,M_test,Mtb_test, Mactive_test,Mlatent_test,W_tb_test,W_active_test,W_latent_test = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=500, reuse=True)
     A = tf.matmul(U_test,V_test)
     A = A*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
@@ -223,9 +223,9 @@ def train(z, closs, label_acc_adv_theta):
             llamb[i2] = 0
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.5})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.5})
             vtp_loss,closs_,closstb_,clossac_,clossla_,label_tb,label_active,label_latent = sess.run([primal_loss, closs, closs2, closs3, closs4,label_acc2,label_acc3,label_acc4], feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
             clf_loss_list.append((closs_, closstb_,clossac_,clossla_))
             vtp_list.append(vtp_loss)
@@ -344,6 +344,7 @@ def train(z, closs, label_acc_adv_theta):
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
+    keep_prob = tf.placeholder_with_default(1.0,())
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels_tb = tf.placeholder(tf.int64, shape=(None))
     labels_active = tf.placeholder(tf.int64, shape=(None))
@@ -351,7 +352,7 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    U,V,B,DELTA_inv,M,M_tb,M_active,M_latent,W_tb,W_active,W_latent = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,n_samples=n_samples)
+    U,V,B,DELTA_inv,M,M_tb,M_active,M_latent,W_tb,W_active,W_latent = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples)
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
@@ -419,8 +420,8 @@ if __name__ == "__main__":
     dual_loss = d_loss_d+d_loss_i
 
     # dual loss for theta
-    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,B,DELTA_inv,inp_data_dim, inp_cov_dim, latent_dim, rank)
-    
+    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,B,DELTA_inv,inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob)
+
     #Adversary Accuracy
     correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
     label_acc_adv = correct_labels_adv/(2.0*batch_size)

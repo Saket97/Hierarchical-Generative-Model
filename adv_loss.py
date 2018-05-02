@@ -9,7 +9,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 thresh_adv = 0.5
 
-def generate_classifier(latent_dim, n_samples,reuse=False):
+def generate_classifier(latent_dim, n_samples,keep_prob,reuse=False):
     with tf.variable_scope("generate_classifier",reuse=reuse):
         w = tf.random_normal([n_samples, latent_dim//2], mean=0, stddev=1.0)
         out = slim.fully_connected(w,32,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.5)) # (1,1024)
@@ -35,15 +35,19 @@ def generate_classifier(latent_dim, n_samples,reuse=False):
         M_latent = gumbel_softmax(logits_gumbel,t)
         M_latent = tf.squeeze(tf.slice(M_latent,[0,0,0],[-1,-1,1]),axis=2)
 
-        #h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(50.0))
-        W_tb = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(50.0))
-        #h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(50.0))
-        W_active = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(50.0))
-        #h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(50.0))
-        W_latent = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(50.0))
+        out = tf.nn.dropout(out,keep_prob)
+        h = slim.fully_connected(out,32,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
+        h = tf.nn.dropout(h,keep_prob)
+        W_tb = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
+        h = tf.nn.dropout(h,keep_prob)
+        W_active = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
+        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
+        h = tf.nn.dropout(h,keep_prob)
+        W_latent = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
     return M_tb,M_active,M_latent,W_tb,W_active,W_latent
 
-def generator(inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples=1, noise_dim=100, reuse=False):
+def generator(inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob, n_samples=1, noise_dim=100, reuse=False):
     """ Generate samples for A,B and DELTA 
         Returns:
             A: A tensor of shape (n_samples, inp_data_dim, latent_dim)
@@ -95,10 +99,10 @@ def generator(inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples=1, noise_di
         #M = tf.Print(M,[M],message="M output generator")
         #M = cloglog(logits_gumbel)
         variable_summaries(M,name="M_generator")
-        M_tb,M_active,M_latent,W_tb,W_active,W_latent=generate_classifier(latent_dim,n_samples,reuse=reuse)
+        M_tb,M_active,M_latent,W_tb,W_active,W_latent=generate_classifier(latent_dim,n_samples,keep_prob,reuse=reuse)
     return U,V,B,del_sample,M,M_tb,M_active,M_latent,W_tb,W_active,W_latent
 
-def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_cov_dim, latent_dim, rank, n_samples = 100):
+def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob, n_samples = 100):
     # n_samples = 100
     p_samples_U = tf.random_normal([n_samples, inp_data_dim, rank])
     p_samples_V = tf.random_normal([n_samples, rank, latent_dim])
@@ -115,7 +119,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     p_samples_Mlatent = gumbel_softmax(tf.ones([n_samples, latent_dim,2]), tf.constant(0.01, dtype=tf.float32,shape=(n_samples,1)))
     p_samples_Mlatent = tf.squeeze(tf.slice(p_samples_Mlatent,[0,0,0],[-1,-1,1]),axis=2)
     p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
-    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M, q_samples_Mtb, q_samples_Mactive,q_samples_Mlatent,q_samples_W_tb,q_samples_W_active,q_samples_W_latent = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,n_samples=n_samples, reuse=True)
+    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M, q_samples_Mtb, q_samples_Mactive,q_samples_Mlatent,q_samples_W_tb,q_samples_W_active,q_samples_W_latent = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples, reuse=True)
 
     variable_summaries(p_samples_M, name="p_samples_M")
     variable_summaries(q_samples_M, name="q_samples_M")

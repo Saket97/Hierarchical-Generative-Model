@@ -184,7 +184,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mtb = correct_labels_adv/(2*n_samples)
     label_acc_adv_mtb = tf.Print(label_acc_adv_mtb, [label_acc_adv_mtb], message="label_acc_adv_mtb")
     dloss_mtb = d_loss_d+d_loss_i
-    q_ratio_m += 40*tf.reduce_mean(q_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Mactive_ratio(p_samples_Mactive)
     q_ratio = Mactive_ratio(q_samples_Mactive, reuse=True)

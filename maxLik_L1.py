@@ -17,7 +17,7 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
 latent_dim=60
-nepoch = 2001
+nepoch = 3001
 lr = 10**(-4)
 batch_size = 180
 ntrain = 180
@@ -223,15 +223,15 @@ def train(z, closs, label_acc_adv_theta):
             llamb[i2] = 0
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.5})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.5})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3})
             vtp_loss,closs_,closstb_,clossac_,clossla_,label_tb,label_active,label_latent = sess.run([primal_loss, closs, closs2, closs3, closs4,label_acc2,label_acc3,label_acc4], feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
             clf_loss_list.append((closs_, closstb_,clossac_,clossla_))
             vtp_list.append(vtp_loss)
         if i%100 == 0:
             Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb,c:cmb})
-            print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_," label_acc_tb:",label_tb, " label_acc_active:",label_active, " label_acc_latent:",label_latent)
+            print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_," label_acc_tb:",label_tb, " label_acc_active:",label_active, " label_acc_latent:",label_latent, " logr:",logr_," logz:",logz_)
         if i%500 == 0:
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()

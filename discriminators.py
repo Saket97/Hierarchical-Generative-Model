@@ -140,12 +140,6 @@ def Mlatent_ratio(M, n_layer=2, n_hidden=32, reuse=False):
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def Mhiv_ratio(M, n_layer=2, n_hidden=32, reuse=False):
-    with tf.variable_scope("Mhiv", reuse=reuse):
-        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
-        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
-    return h
-
 def Wtb_ratio(M, n_layer=1, n_hidden=64, reuse=False):
     with tf.variable_scope("Wtb", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
@@ -163,10 +157,3 @@ def Wlatent_ratio(M, n_layer=2, n_hidden=64, reuse=False):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
-
-def Whiv_ratio(M, n_layer=2, n_hidden=64, reuse=False):
-    with tf.variable_scope("Whiv", reuse=reuse):
-        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
-        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
-    return h
-

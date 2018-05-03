@@ -154,9 +154,29 @@ def train(z, closs, label_acc_adv_theta):
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
-    adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
-    adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    primal_grad = primal_optimizer.compute_gradients(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
+    capped_g_grad = []
+    for grad,var in primal_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    primal_train_op = primal_optimizer.apply_gradients(capped_g_grad)
+
+    #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
+    adversary_grad = dual_optimizer.compute_gradients(dual_loss+r_loss,var_list=d_vars)
+    capped_g_grad = []
+    for grad,var in adversary_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
+
+    #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta+r_loss, var_list=tr_vars)
+    capped_g_grad = []
+    for grad,var in adversary_theta_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
+
     #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
 
@@ -296,7 +316,7 @@ def train(z, closs, label_acc_adv_theta):
             path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
             print("Model saved at ",path)
             auc.append([auc_tb,auc_ac,auc_la])
-    
+
     # Save the summary data for analysis
     A_,B_,DELTA_inv_,M_test_,Mtb_test_, Mactive_test_,Mlatent_test_ = sess.run([A,B,DELTA_inv, M_test,Mtb_test, Mactive_test,Mlatent_test])
     M_test_ = M_test_[0]
@@ -318,7 +338,7 @@ def train(z, closs, label_acc_adv_theta):
     np.save("Mlatent.npy",Mlatent_test_)
 
     # Test Set
-    z_list = []       
+    z_list = []
     test_lik_list = []
     test_prob_tb = []
     test_prob_ac = []
@@ -439,7 +459,7 @@ if __name__ == "__main__":
     f_input = tf.exp(f_input)
     print("f_input_shape:",f_input.get_shape().as_list())
     t4 = tf.reduce_mean(tf.square(f_input-1))
-    t4 = tf.reduce_mean(f(f_input-1))
+    #t4 = tf.reduce_mean(f(f_input-1))
     KL_neg_r_q = t1
     ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3)
     primal_loss = tf.reduce_mean(-ELBO)

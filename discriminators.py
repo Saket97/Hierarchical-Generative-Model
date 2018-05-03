@@ -126,39 +126,75 @@ def M_ratio(M,  inp_data_dim, latent_dim,n_layer=2, n_hidden=128, reuse=False):
    
     return h
 
-def Mtb_ratio(M, n_layer=2, n_hidden=32, reuse=False):
-    with tf.variable_scope("Mtb", reuse=reuse):
+def Mcnp_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mcnp", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
    
     return h
 
-def Mactive_ratio(M, n_layer=2, n_hidden=32, reuse=False):
-    with tf.variable_scope("Mactive", reuse=reuse):
+def Mdiabetes_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mdiabetes", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def Mlatent_ratio(M, n_layer=2, n_hidden=32, reuse=False):
-    with tf.variable_scope("Mlatent", reuse=reuse):
+def Mgluten_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mgluten", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def Wtb_ratio(M, n_layer=1, n_hidden=64, reuse=False):
-    with tf.variable_scope("Wtb", reuse=reuse):
+def Mibd_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mibd", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def Wactive_ratio(M, n_layer=2, n_hidden=64, reuse=False):
-    with tf.variable_scope("Wactive", reuse=reuse):
+def Mlactose_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mlactose", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h
 
-def Wlatent_ratio(M, n_layer=2, n_hidden=64, reuse=False):
-    with tf.variable_scope("Wlatent", reuse=reuse):
+def Mquino_ratio(M, n_layer=2, n_hidden=32, reuse=False):
+    with tf.variable_scope("Mquino", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wcnp_ratio(M, n_layer=1, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wcnp", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wdiabetes_ratio(M, n_layer=2, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wdiabetes", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wgluten_ratio(M, n_layer=2, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wgluten", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wibd_ratio(M, n_layer=2, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wibd", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wlactose_ratio(M, n_layer=2, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wlactose", reuse=reuse):
+        h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
+    return h
+
+def Wquino_ratio(M, n_layer=2, n_hidden=64, reuse=False):
+    with tf.variable_scope("Wquino", reuse=reuse):
         h = slim.repeat(M,n_layer, slim.fully_connected,n_hidden,activation_fn=lrelu,weights_regularizer=slim.l2_regularizer(0.1))
         h = slim.fully_connected(h,1,activation_fn=None,weights_regularizer=slim.l2_regularizer(0.1))
     return h

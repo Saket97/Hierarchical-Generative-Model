@@ -452,7 +452,7 @@ if __name__ == "__main__":
     label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Td)
+    t1 = -tf.reduce_mean(Ti)
     t2 = x_post_prob_log
     t3 = tf.reduce_mean(q_ratio)
     f_input = tf.squeeze(q_ratio)-Td

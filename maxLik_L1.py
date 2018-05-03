@@ -246,9 +246,9 @@ def train(z, closs, label_acc_adv_theta):
             llamb[i2] = 0
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:0, pearson:1})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:1, pearson:0})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:0, pearson:1})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb,keep_prob:0.3, reverse_kl:1, pearson:0})
             vtp_loss,closs_,closstb_,clossac_,clossla_,label_tb,label_active,label_latent = sess.run([primal_loss, closs, closs2, closs3, closs4,label_acc2,label_acc3,label_acc4], feed_dict={x:xmb,c:cmb,labels_tb:ltbmb, labels_active:lacmb, labels_latent:llamb})
             clf_loss_list.append((closs_, closstb_,clossac_,clossla_))
             vtp_list.append(vtp_loss)
@@ -368,8 +368,8 @@ if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     keep_prob = tf.placeholder_with_default(1.0,())
-    reverse_kl = tf.placeholder_with_default(0.0,())
-    pearson = tf.placeholder_with_default(1.0,())
+    reverse_kl = tf.placeholder_with_default(1.0,())
+    pearson = tf.placeholder_with_default(0.0,())
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels_tb = tf.placeholder(tf.int64, shape=(None))
     labels_active = tf.placeholder(tf.int64, shape=(None))

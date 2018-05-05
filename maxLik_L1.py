@@ -153,9 +153,33 @@ def train(z, closs, label_acc_adv_theta):
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
-    adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
-    adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    primal_grad = primal_optimizer.compute_gradients(primal_loss+r_loss+closs+r_loss_clf, var_list=tp_var+c_vars)
+    capped_g_grad = []
+    for grad,var in primal_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    primal_train_op = primal_optimizer.apply_gradients(capped_g_grad)
+
+    adversary_grad = dual_optimizer.compute_gradients(dual_loss+r_loss,var_list=d_vars)
+    capped_g_grad = []
+    for grad,var in adversary_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
+  
+    #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta+r_loss, var_list=tr_vars)
+    capped_g_grad = []
+    for grad,var in adversary_theta_grad:
+        if grad is not None:
+            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
+
+
+
+
+    #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
+    #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
     #clf_train_op = classifier_optimizer.minimize(closs+r_loss_clf, var_list=c_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
@@ -163,8 +187,8 @@ def train(z, closs, label_acc_adv_theta):
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
     U_test,V_test,B_test,D_test,M_test,Mtb_test, Mactive_test,Mlatent_test,Mhiv_test,W_tb_test,W_active_test,W_latent_test,W_hiv_test = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,n_samples=500, reuse=True)
-    A = tf.matmul(U_test,V_test)
-    A = A*M_test
+    A_old = tf.matmul(U_test,V_test)
+    A = A_old*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
     t = (X_test-means)
@@ -309,7 +333,7 @@ def train(z, closs, label_acc_adv_theta):
             auc.append([auc_hiv,auc_tb,auc_ac,auc_la])
     
     # Save the summary data for analysis
-    A_,B_,DELTA_inv_,M_test_,Mtb_test_, Mactive_test_,Mlatent_test_,Mhiv_test_ = sess.run([A,B,DELTA_inv, M_test,Mtb_test, Mactive_test,Mlatent_test,Mhiv_test])
+    A_,B_,DELTA_inv_,M_test_,Mtb_test_, Mactive_test_,Mlatent_test_,Mhiv_test_ = sess.run([A_old,B,DELTA_inv, M_test,Mtb_test, Mactive_test,Mlatent_test,Mhiv_test])
     M_test_ = M_test_[0]
     Mtb_test_ = Mtb_test_[0]
     Mactive_test_ = Mactive_test_[0]
@@ -367,6 +391,8 @@ if __name__ == "__main__":
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
+    reverse_kl = tf.placeholder_with_default(1.0,())
+    pearson = tf.placeholder_with_default(0.0,())
     labels_tb = tf.placeholder(tf.int64, shape=(None))
     labels_active = tf.placeholder(tf.int64, shape=(None))
     labels_latent = tf.placeholder(tf.int64, shape=(None))
@@ -453,11 +479,15 @@ if __name__ == "__main__":
     label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Td)
-    t2 = x_post_prob_log+logz-logr
+    t1 = -tf.reduce_mean(Ti)
+    t2 = x_post_prob_log
+    t5 = logz-logr
     t3 = q_ratio
+    f_input = tf.squeeze(q_ratio)-Td
+    f_input = tf.exp(f_input) 
+    t4 = tf.reduce_mean(tf.square(f_input-1))
     KL_neg_r_q = t1
-    ELBO = t1+t2+t3
+    ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3+t5)
     primal_loss = tf.reduce_mean(-ELBO)
 
     print("V in main:",V.get_shape().as_list())

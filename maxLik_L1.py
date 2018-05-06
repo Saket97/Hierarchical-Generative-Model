@@ -16,10 +16,10 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=60
-nepoch = 3001
+latent_dim=30
+nepoch = 2401
 lr = 10**(-4)
-batch_size = 420
+batch_size = 440
 ntrain = 1000
 test_batch_size = 207
 ntest=207
@@ -29,10 +29,10 @@ eps_dim = 40
 eps_nbasis=32
 n_clf_epoch = 5000
 thresh_adv = 0.5
-rank = 20
+rank = 15
 num_hiv_classes = 2
 num_tb_classes = 2
-tb_coeff = 200
+tb_coeff = 60
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
@@ -42,14 +42,14 @@ if tf.gfile.Exists(FLAGS.logdir):
 tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
-    raw_data = np.load("/opt/data/saket/gene_data/data/mod_feat_micro.npy")
-    cov = np.load("/opt/data/saket/gene_data/data/micro_cov.npy")
-    labels_cnp = np.load("/opt/data/saket/gene_data/data/micro_label_cnp.npy")
-    labels_diabetes = np.load("/opt/data/saket/gene_data/data/micro_label_diabetes.npy")
-    labels_gluten = np.load("/opt/data/saket/gene_data/data/micro_label_gluten.npy")
-    labels_ibd = np.load("/opt/data/saket/gene_data/data/micro_label_ibd.npy")
-    labels_lactose = np.load("/opt/data/saket/gene_data/data/micro_label_lactose.npy")
-    labels_quino = np.load("/opt/data/saket/gene_data/data/micro_label_quinoline.npy")
+    raw_data = np.load("data/data_micro/mod_feat_micro.npy")
+    cov = np.load("data/data_micro/micro_cov.npy")
+    labels_cnp = np.load("data/data_micro/micro_label_cnp.npy")
+    labels_diabetes = np.load("data/data_micro/micro_label_diabetes.npy")
+    labels_gluten = np.load("data/data_micro/micro_label_gluten.npy")
+    labels_ibd = np.load("data/data_micro/micro_label_ibd.npy")
+    labels_lactose = np.load("data/data_micro/micro_label_lactose.npy")
+    labels_quino = np.load("data/data_micro/micro_label_quinoline.npy")
     labels_cnp = np.squeeze(labels_cnp)
     labels_diabetes = np.squeeze(labels_diabetes)
     labels_gluten = np.squeeze(labels_gluten)
@@ -71,11 +71,14 @@ def next_minibatch():
     cnp1 = (Lcnp_train==1).nonzero()[0]
     db0 = (Ldiabetes_train==0).nonzero()[0]
     db1 = (Ldiabetes_train==1).nonzero()[0]
+    gl0 = (Lgluten_train==0).nonzero()[0]
+    gl1 = (Lgluten_train==1).nonzero()[0]
     ibd0 = (Libd_train==0).nonzero()[0]
     ibd1 = (Libd_train==1).nonzero()[0]
     quino0 = (Lquino_train==0).nonzero()[0]
     quino1 = (Lquino_train==1).nonzero()[0]
-    indices = np.concatenate([np.random.choice(cnp0,120),np.random.choice(cnp1,80),np.random.choice(db0,20),np.random.choice(db1,20),np.random.choice(ibd0,90),np.random.choice(ibd1,30),np.random.choice(quino0,30),np.random.choice(quino1,30)])
+#    indices = np.concatenate([np.random.choice(cnp0,80),np.random.choice(cnp1,80),np.random.choice(db0,20),np.random.choice(db1,20),np.random.choice(ibd0,90),np.random.choice(ibd1,30),np.random.choice(quino0,30),np.random.choice(quino1,30)])
+    indices = np.concatenate([np.random.choice(gl0,200),np.random.choice(gl1,200),np.random.choice(ibd1,40)])
     xmb = X_train[indices,:]
     cmb = C_train[indices,:]
     cnp_mb = Lcnp_train[indices]
@@ -139,7 +142,7 @@ def train(z, closs, label_acc_adv_theta):
     r_loss = tf.losses.get_regularization_loss()
     r_loss_clf = tf.losses.get_regularization_loss(scope="Classifier")
     r_loss -= r_loss_clf
-    primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
+    primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True, beta1=0.5)
     dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
@@ -180,9 +183,9 @@ def train(z, closs, label_acc_adv_theta):
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,C_test,eps,reuse=True)
-    U_test,V_test,B_test,D_test,M_test,Mcnp_test, Mdiabetes_test,Mgluten_test,Mibd_test,Mlactose_test,Mquino_test,W_cnp_test,W_diabetes_test,W_gluten_test,W_ibd_test,W_lactose_test,W_quino_test = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=500, reuse=True)
-    A = tf.matmul(U_test,V_test)
-    A = A*M_test
+    U_test,V_test,B_test,D_test,M_test,Mgluten_test,Mibd_test,W_gluten_test,W_ibd_test = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=500, reuse=True)
+    A_old = tf.matmul(U_test,V_test)
+    A = A_old*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))+tf.matmul(tf.ones([B_test.get_shape().as_list()[0],C_test.shape[0],inp_cov_dim])*C_test,tf.transpose(B_test, perm=[0,2,1])) # (n_samples, 52, 60) (n_samples, 60, 5000) = (n_samples, 52, 5000)
     prec = tf.square(D_test)
     t = (X_test-means)
@@ -194,13 +197,13 @@ def train(z, closs, label_acc_adv_theta):
     #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
     x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
 
-    prob_test2, closs_test2 = classifier_cnp(z_test,labels_cnp,W_cnp_test,Mcnp_test,reuse=True)
-    correct_label_pred_test = tf.equal(tf.argmax(prob_test2,1),labels_cnp)
-    label_acc_test2 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+    #prob_test2, closs_test2 = classifier_cnp(z_test,labels_cnp,W_cnp_test,Mcnp_test,reuse=True)
+    #correct_label_pred_test = tf.equal(tf.argmax(prob_test2,1),labels_cnp)
+    #label_acc_test2 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
-    prob_test3, closs_test3 = classifier_diabetes(z_test,labels_diabetes,W_diabetes_test,Mdiabetes_test,reuse=True)
-    correct_label_pred_test = tf.equal(tf.argmax(prob_test3,1),labels_diabetes)
-    label_acc_test3 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+    #prob_test3, closs_test3 = classifier_diabetes(z_test,labels_diabetes,W_diabetes_test,Mdiabetes_test,reuse=True)
+    #correct_label_pred_test = tf.equal(tf.argmax(prob_test3,1),labels_diabetes)
+    #label_acc_test3 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
     prob_test4, closs_test4 = classifier_gluten(z_test,labels_gluten,W_gluten_test,Mgluten_test,reuse=True)
     correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_gluten)
@@ -210,23 +213,23 @@ def train(z, closs, label_acc_adv_theta):
     correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_ibd)
     label_acc_test5 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
-    prob_test6, closs_test6 = classifier_lactose(z_test,labels_lactose,W_lactose_test,Mlactose_test,reuse=True)
-    correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_lactose)
-    label_acc_test6 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+    #prob_test6, closs_test6 = classifier_lactose(z_test,labels_lactose,W_lactose_test,Mlactose_test,reuse=True)
+    #correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_lactose)
+    #label_acc_test6 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
-    prob_test7, closs_test7 = classifier_quino(z_test,labels_quino,W_quino_test,Mquino_test,reuse=True)
-    correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_quino)
-    label_acc_test7 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
+    #prob_test7, closs_test7 = classifier_quino(z_test,labels_quino,W_quino_test,Mquino_test,reuse=True)
+    #correct_label_pred_test = tf.equal(tf.argmax(prob_test4,1),labels_quino)
+    #label_acc_test7 = tf.reduce_mean(tf.cast(correct_label_pred_test, tf.float32))
 
-    closs_test =closs_test2+closs_test3+closs_test4+closs_test5+closs_test6+closs_test7
-    label_acc_test = (label_acc_test2+label_acc_test3+label_acc_test4+label_acc_test5+label_acc_test6+label_acc_test7)/6.0
+    closs_test =closs_test4+closs_test5
+    label_acc_test = (label_acc_test4+label_acc_test5)/2.0
 
     saver = tf.train.Saver()
     merged = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(FLAGS.logdir, graph = tf.get_default_graph())
     sess = tf.Session()
-    #saver.restore(sess,"/opt/data/saket/gene_data/model_spike/model.ckpt-249")
     sess.run(tf.global_variables_initializer())
+    #saver.restore(sess,"model/model.ckpt-99")
     si_list = []
     vtp_list = []
     clf_loss_list = []
@@ -245,18 +248,18 @@ def train(z, closs, label_acc_adv_theta):
             # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
             xmb,cmb,cnp_mb,db_mb,gl_mb,ibd_mb,lac_mb,quin_mb = next_minibatch()
             for gen in range(1):
-                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.3,reverse_kl:1,pearson:0})
+                sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.2})
                 #sess.run(train_op, feed_dict={x:xmb,c:cmb,labels_cnp:Lcnp_train[j*batch_size:(j+1)*batch_size],labels_diabetes:Ldiabetes_train[j*batch_size:(j+1)*batch_size],labels_gluten:Lgluten_train[j*batch_size:(j+1)*batch_size],labels_ibd:Libd_train[j*batch_size:(j+1)*batch_size],labels_lactose:Llactose_train[j*batch_size:(j+1)*batch_size],labels_quino:Lquino_train[j*batch_size:(j+1)*batch_size],keep_prob:0.3, reverse_kl:0, pearson:1})
             for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.3,reverse_kl:1,pearson:0})
+                sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.2})
                 #sess.run(adversary_theta_train_op, feed_dict={x:xmb,c:cmb,labels_cnp:Lcnp_train[j*batch_size:(j+1)*batch_size],labels_diabetes:Ldiabetes_train[j*batch_size:(j+1)*batch_size],labels_gluten:Lgluten_train[j*batch_size:(j+1)*batch_size],labels_ibd:Libd_train[j*batch_size:(j+1)*batch_size],labels_lactose:Llactose_train[j*batch_size:(j+1)*batch_size],labels_quino:Lquino_train[j*batch_size:(j+1)*batch_size],keep_prob:0.3, reverse_kl:0, pearson:1})
 
-            vtp_loss,closs_,closscnp_,clossdiabetes_,clossgluten_,clossibd_,closslactose_,clossquino_,label_cnp,label_diabetes,label_gluten,label_ibd,label_lactose,label_quino = sess.run([primal_loss, closs, closs2, closs3, closs4, closs5, closs6, closs7,label_acc2,label_acc3,label_acc4,label_acc5,label_acc6,label_acc7], feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.3,reverse_kl:1,pearson:0})
-            clf_loss_list.append((closs_,closscnp_,clossdiabetes_,clossgluten_,clossibd_,closslactose_,clossquino_))
+            vtp_loss,closs_,clossgluten_,clossibd_,label_gluten,label_ibd = sess.run([primal_loss, closs, closs4, closs5,label_acc4,label_acc5,], feed_dict={x:xmb,c:cmb,labels_cnp:cnp_mb,labels_diabetes:db_mb,labels_gluten:gl_mb,labels_ibd:ibd_mb,labels_lactose:lac_mb,labels_quino:quin_mb,keep_prob:0.2})
+            clf_loss_list.append((closs_,clossgluten_,clossibd_))
             vtp_list.append(vtp_loss)
         if i%100 == 0:
             Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_,f_input_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta,f_input], feed_dict={x:xmb,c:cmb})
-            print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_," label_acc_cnp:",label_cnp, " label_acc_diabetes:",label_diabetes, " label_acc_gluten:",label_gluten, " label_acc_ibd:",label_ibd, " label_acc_lactose:",label_lactose, " label_acc_quino:",label_quino, " logr:",logr_," logz:",logz_)
+            print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_," closs:",closs_, " label_acc_gluten:",label_gluten, " label_acc_ibd:", " logr:",logr_," logz:",logz_)
         if i%500 == 0:
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()
@@ -266,67 +269,30 @@ def train(z, closs, label_acc_adv_theta):
 
         if i%100 == 0:
             test_lik_list = []
-            test_prob_cnp = []
-            test_prob_db = []
+            #test_prob_cnp = []
+            #test_prob_db = []
             test_prob_gl = []
             test_prob_ibd = []
-            test_prob_lac = []
-            test_prob_quino = []
+            #test_prob_lac = []
+            #test_prob_quino = []
             test_acc_tb = []
             for i in range(100):
                 test_lik = sess.run(x_post_prob_log_test)
                 test_lik_list.append(test_lik)
-                lt_cnp,lt_db,lt_gl,lt_ibd,lt_lac,lt_quino, la, la_tb = sess.run([prob_test2,prob_test3,prob_test4,prob_test5,prob_test6,prob_test7, label_acc_test, label_acc_test2], feed_dict={labels_cnp:Lcnp_test,labels_diabetes:Ldiabetes_test,labels_gluten:Lgluten_test,labels_ibd:Libd_test,labels_lactose:Llactose_test,labels_quino:Lquino_test})
-                test_prob_cnp.append(lt_cnp)
-                test_prob_db.append(lt_db)
+                lt_gl,lt_ibd, la  = sess.run([prob_test4,prob_test5, label_acc_test], feed_dict={labels_cnp:Lcnp_test,labels_diabetes:Ldiabetes_test,labels_gluten:Lgluten_test,labels_ibd:Libd_test,labels_lactose:Llactose_test,labels_quino:Lquino_test})
+
                 test_prob_gl.append(lt_gl)
                 test_prob_ibd.append(lt_ibd)
-                test_prob_lac.append(lt_lac)
-                test_prob_quino.append(lt_quino)
-                test_acc_tb.append(la_tb)
-            avg_test_prob_cnp = np.mean(test_prob_cnp,axis=0)
             #print("avg_test_prob_tb:",avg_test_prob_tb)
             #print("Ltb_test:",Ltb_test)
-            avg_acc_tb_tmp = np.mean(test_acc_tb)
-            print("tmp tb acc:",avg_acc_tb_tmp)
-            avg_test_prob_db = np.mean(test_prob_db,axis=0)
             avg_test_prob_gl = np.mean(test_prob_gl,axis=0)
             avg_test_prob_ibd = np.mean(test_prob_ibd,axis=0)
-            avg_test_prob_lac = np.mean(test_prob_lac,axis=0)
-            avg_test_prob_quino = np.mean(test_prob_quino,axis=0)
-            #print("avg_test_prob_ac:",avg_test_prob_ac)
-            avg_test_acc_cnp = np.mean((np.argmax(avg_test_prob_cnp,axis=1)==Lcnp_test))
-            avg_test_acc_db = np.mean((np.argmax(avg_test_prob_db,axis=1)==Ldiabetes_test))
             avg_test_acc_gl = np.mean((np.argmax(avg_test_prob_gl,axis=1)==Lgluten_test))
             avg_test_acc_ibd = np.mean((np.argmax(avg_test_prob_ibd,axis=1)==Libd_test))
-            avg_test_acc_lac = np.mean((np.argmax(avg_test_prob_lac,axis=1)==Llactose_test))
-            avg_test_acc_quino = np.mean((np.argmax(avg_test_prob_quino,axis=1)==Lquino_test))
-            print("Average Test Set Accuracy CNP:",avg_test_acc_cnp)
-            print("Average Test Set Accuracy Diabetes:",avg_test_acc_db)
             print("Average Test Set Accuracy Gluten:",avg_test_acc_gl)
             print("Average Test Set Accuracy ibd:",avg_test_acc_ibd)
-            print("Average Test Set Accuracy Lactose:",avg_test_acc_lac)
-            print("Average Test Set Accuracy Quino:",avg_test_acc_quino)
-            countN1(avg_test_prob_cnp,Lcnp_test,"CNP")
-            countN1(avg_test_prob_db,Ldiabetes_test,"Diabetes")
             countN1(avg_test_prob_gl,Lgluten_test,"Gluten")
             countN1(avg_test_prob_ibd,Libd_test,"IBD")
-            countN1(avg_test_prob_lac,Llactose_test,"Lactose")
-            countN1(avg_test_prob_quino,Lquino_test,"Quino")
-            tmp = np.zeros((Lcnp_test.shape[0],2))
-            t = Lcnp_test.astype(np.int32)
-            #print("#1 in t:",np.sum(t))
-            #print("t:",t)
-            tmp[np.arange(Lcnp_test.shape[0]),t] = 1
-            count1 = np.sum(tmp[:,1])
-            print("#1 in tmp:",count1)
-            auc_cnp = skm.roc_auc_score(tmp,avg_test_prob_cnp)
-            print("AUC CNP:",auc_cnp)
-            tmp = np.zeros((Ldiabetes_test.shape[0],2))
-            t = Ldiabetes_test.astype(np.int32)
-            tmp[np.arange(Ldiabetes_test.shape[0]),t] = 1
-            auc_db = skm.roc_auc_score(tmp,avg_test_prob_db)
-            print("AUC Diabetes:",auc_db)
             tmp = np.zeros((Lgluten_test.shape[0],2))
             t = Lgluten_test.astype(np.int32)
             tmp[np.arange(Lgluten_test.shape[0]),t] = 1
@@ -337,33 +303,19 @@ def train(z, closs, label_acc_adv_theta):
             tmp[np.arange(Libd_test.shape[0]),t] = 1
             auc_ibd = skm.roc_auc_score(tmp,avg_test_prob_ibd)
             print("AUC IBD:",auc_ibd)
-            tmp = np.zeros((Llactose_test.shape[0],2))
-            t = Llactose_test.astype(np.int32)
-            tmp[np.arange(Llactose_test.shape[0]),t] = 1
-            auc_lac = skm.roc_auc_score(tmp,avg_test_prob_lac)
-            print("AUC Lactose:",auc_lac)
-            tmp = np.zeros((Lquino_test.shape[0],2))
-            t = Lquino_test.astype(np.int32)
-            tmp[np.arange(Lquino_test.shape[0]),t] = 1
-            auc_quino = skm.roc_auc_score(tmp,avg_test_prob_quino)
-            print("AUC Quino:",auc_quino)
             test_lik = np.stack(test_lik_list, axis=1)
             test_lik = np.mean(test_lik, axis=1)
             test_lik = np.mean(test_lik)
             test_lik_list1.append(test_lik)
             path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
             print("Model saved at ",path)
-            auc.append([auc_cnp,auc_db,auc_gl,auc_ibd,auc_lac,auc_quino])
-    
+            auc.append([auc_gl,auc_ibd])
+
     # Save the summary data for analysis
-    A_,B_,DELTA_inv_,M_test_,Mcnp_test_, Mdiabetes_test_,Mgluten_test_,Mibd_test_,Mlactose_test_,Mquino_test_ = sess.run([A,B,DELTA_inv, M_test,Mcnp_test, Mdiabetes_test,Mgluten_test,Mibd_test,Mlactose_test,Mquino_test])
+    A_,B_,DELTA_inv_,M_test_,Mgluten_test_,Mibd_test_ = sess.run([A_old,B,DELTA_inv, M_test,Mgluten_test,Mibd_test])
     M_test_ = M_test_[0]
-    Mcnp_test_ = Mcnp_test_[0]
-    Mdiabetes_test_ = Mdiabetes_test_[0]
     Mgluten_test_ = Mgluten_test_[0]
     Mibd_test_ = Mibd_test_[0]
-    Mlactose_test_ = Mlactose_test_[0]
-    Mquino_test_ = Mquino_test_[0]
     np.save("vtp_loss1.npy", vtp_list)
     #np.save("x_post_list1.npy",post_test_list)
     np.save("A1.npy",np.mean(A_, axis=0))
@@ -374,13 +326,8 @@ def train(z, closs, label_acc_adv_theta):
     np.save("test_acc.npy",test_acc_list)
     np.save("M1.npy",M_test_)
     np.save("auc.npy",auc)
-    np.save("Mcnp.npy",Mcnp_test_)
-    np.save("Mdiabetes.npy",Mdiabetes_test_)
     np.save("Mgluten.npy",Mgluten_test_)
     np.save("Mibd.npy",Mibd_test_)
-    np.save("Mlactose.npy",Mlactose_test_)
-    np.save("Mquio.npy",Mquino_test_)
-
     ## Test Set
     #z_list = []       
     #test_lik_list = []
@@ -412,8 +359,8 @@ if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     keep_prob = tf.placeholder_with_default(1.0,())
-    reverse_kl = tf.placeholder_with_default(0.0,())
-    pearson = tf.placeholder_with_default(1.0,())
+    reverse_kl = tf.placeholder_with_default(1.0,())
+    pearson = tf.placeholder_with_default(0.0,())
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels_cnp = tf.placeholder(tf.int64, shape=(None))
     labels_diabetes = tf.placeholder(tf.int64, shape=(None))
@@ -424,7 +371,7 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    U,V,B,DELTA_inv,M,M_cnp,M_diabetes,M_gluten,M_ibd,M_lactose,M_quino,W_cnp,W_diabetes,W_gluten,W_ibd,W_lactose,W_quino = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples)
+    U,V,B,DELTA_inv,M,M_gluten,M_ibd,W_gluten,W_ibd = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples)
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
@@ -432,18 +379,10 @@ if __name__ == "__main__":
     A1 = A1*M1
     B1 = tf.slice(B,[0,0,0],[1,-1,-1])
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
-    M_cnp = tf.slice(M_cnp,[0,0],[1,-1])
-    M_diabetes = tf.slice(M_diabetes,[0,0],[1,-1])
     M_gluten = tf.slice(M_gluten,[0,0],[1,-1])
     M_ibd = tf.slice(M_ibd,[0,0],[1,-1])
-    M_lactose = tf.slice(M_lactose,[0,0],[1,-1])
-    M_quino = tf.slice(M_quino,[0,0],[1,-1])
-    W_cnp = tf.slice(W_cnp,[0,0],[1,-1])
-    W_diabetes = tf.slice(W_diabetes,[0,0],[1,-1])
     W_gluten = tf.slice(W_gluten,[0,0],[1,-1])
     W_ibd = tf.slice(W_ibd,[0,0],[1,-1])
-    W_lactose = tf.slice(W_lactose,[0,0],[1,-1])
-    W_quino = tf.slice(W_quino,[0,0],[1,-1])
     #M_tb = tf.Print(M_tb,[M_tb],message="M_tb")
     #print("W_tb_shape:",W_tb.get_shape().as_list())
 
@@ -473,15 +412,15 @@ if __name__ == "__main__":
     x_post_prob_log = tf.reduce_mean(x_post_prob_log)
 
     # Classifier
-    logits, closs2 = classifier_cnp(z,labels_cnp,W_cnp,M_cnp,reuse=False)
-    #logits = tf.Print(logits,[logits],message="prob tb")
-    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_cnp)
-    label_acc2 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+    #logits, closs2 = classifier_cnp(z,labels_cnp,W_cnp,M_cnp,reuse=False)
+    ##logits = tf.Print(logits,[logits],message="prob tb")
+    #correct_label_pred = tf.equal(tf.argmax(logits,1),labels_cnp)
+    #label_acc2 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    logits, closs3 = classifier_diabetes(z,labels_diabetes,W_diabetes,M_diabetes,reuse=False)
-    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_diabetes)
-    #correct_label_pred = tf.Print(correct_label_pred,[correct_label_pred],message="Avtive pred train")
-    label_acc3 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+    #logits, closs3 = classifier_diabetes(z,labels_diabetes,W_diabetes,M_diabetes,reuse=False)
+    #correct_label_pred = tf.equal(tf.argmax(logits,1),labels_diabetes)
+    ##correct_label_pred = tf.Print(correct_label_pred,[correct_label_pred],message="Avtive pred train")
+    #label_acc3 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
     logits, closs4 = classifier_gluten(z,labels_gluten,W_gluten,M_gluten,reuse=False)
     correct_label_pred = tf.equal(tf.argmax(logits,1),labels_gluten)
@@ -491,16 +430,16 @@ if __name__ == "__main__":
     correct_label_pred = tf.equal(tf.argmax(logits,1),labels_ibd)
     label_acc5 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    logits, closs6 = classifier_lactose(z,labels_lactose,W_lactose,M_lactose,reuse=False)
-    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_lactose)
-    label_acc6 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+    #logits, closs6 = classifier_lactose(z,labels_lactose,W_lactose,M_lactose,reuse=False)
+    #correct_label_pred = tf.equal(tf.argmax(logits,1),labels_lactose)
+    #label_acc6 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    logits, closs7 = classifier_quino(z,labels_quino,W_quino,M_quino,reuse=False)
-    correct_label_pred = tf.equal(tf.argmax(logits,1),labels_quino)
-    label_acc7 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
+    #logits, closs7 = classifier_quino(z,labels_quino,W_quino,M_quino,reuse=False)
+    #correct_label_pred = tf.equal(tf.argmax(logits,1),labels_quino)
+    #label_acc7 = tf.reduce_mean(tf.cast(correct_label_pred, tf.float32))
 
-    closs = tb_coeff*(closs2+2*closs3+closs4+closs5+closs6+closs7)
-    label_acc = (label_acc2+label_acc3+label_acc4+label_acc6+label_acc5+label_acc7)/6.0
+    closs = tb_coeff*(closs4+closs5)
+    label_acc = (label_acc4+label_acc5)/2.0
 
     # Dual loss
     Td = data_network(z)
@@ -517,16 +456,16 @@ if __name__ == "__main__":
     label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Td)
+    t1 = -tf.reduce_mean(Ti)
     t2 = x_post_prob_log
+    t5 = logz-logr
     t3 = tf.reduce_mean(q_ratio)
     f_input = tf.squeeze(q_ratio)-Td
     f_input = tf.exp(f_input)
     print("f_input_shape:",f_input.get_shape().as_list())
     t4 = tf.reduce_mean(tf.square(f_input-1))
-    t4 = tf.reduce_mean(f(f_input-1))
     KL_neg_r_q = t1
-    ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3)
+    ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3+t5)
     primal_loss = tf.reduce_mean(-ELBO)
 
     print("V in main:",V.get_shape().as_list())

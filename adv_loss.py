@@ -14,21 +14,8 @@ def generate_classifier(latent_dim, n_samples,keep_prob,reuse=False):
         w = tf.random_normal([n_samples, latent_dim//2], mean=0, stddev=1.0)
         out = slim.fully_connected(w,32,activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.5)) # (1,1024)
         # Sample Classifier
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        #logits_gumbel = tf.Print(logits_gumbel,[logits_gumbel],message="logits gumbel tb")
-        variable_summaries(logits_gumbel,name="logits_gumbel Mtb")
+
         t = tf.constant(0.001, dtype=tf.float32, shape=[n_samples,1])
-        M_cnp = gumbel_softmax(logits_gumbel,t)
-        M_cnp = tf.squeeze(tf.slice(M_cnp,[0,0,0],[-1,-1,1]),axis=2)
-
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_diabetes = gumbel_softmax(logits_gumbel,t)
-        M_diabetes = tf.squeeze(tf.slice(M_diabetes,[0,0,0],[-1,-1,1]),axis=2)
-
         logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
         logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
         logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
@@ -41,39 +28,13 @@ def generate_classifier(latent_dim, n_samples,keep_prob,reuse=False):
         M_ibd = gumbel_softmax(logits_gumbel,t)
         M_ibd = tf.squeeze(tf.slice(M_ibd,[0,0,0],[-1,-1,1]),axis=2)
 
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_lactose = gumbel_softmax(logits_gumbel,t)
-        M_lactose = tf.squeeze(tf.slice(M_lactose,[0,0,0],[-1,-1,1]),axis=2)
-
-        logits_gumbel = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = slim.fully_connected(logits_gumbel,2*latent_dim,activation_fn = None, weights_regularizer=slim.l2_regularizer(0.005))
-        logits_gumbel = tf.reshape(logits_gumbel,[-1,latent_dim,2])
-        M_quino = gumbel_softmax(logits_gumbel,t)
-        M_quino = tf.squeeze(tf.slice(M_quino,[0,0,0],[-1,-1,1]),axis=2)
-
-        out = tf.nn.dropout(out,keep_prob)
-        h = slim.fully_connected(out,32,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
-        h = tf.nn.dropout(h,keep_prob)
-        W_cnp = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
-        h = tf.nn.dropout(h,keep_prob)
-        W_diabetes = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
         h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
         h = tf.nn.dropout(h,keep_prob)
         W_gluten = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
         h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
         h = tf.nn.dropout(h,keep_prob)
         W_ibd = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
-        h = tf.nn.dropout(h,keep_prob)
-        W_lactose = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
-        h = slim.fully_connected(out,64,activation_fn=tf.nn.elu,weights_regularizer=slim.l2_regularizer(1.0))
-        h = tf.nn.dropout(h,keep_prob)
-        W_quino = slim.fully_connected(out,latent_dim,activation_fn = None,weights_regularizer=slim.l2_regularizer(1.0))
-    return M_cnp,M_diabetes,M_gluten,M_ibd,M_lactose,M_quino,W_cnp,W_diabetes,W_gluten,W_ibd,W_lactose,W_quino
-
+    return M_gluten,M_ibd,W_gluten,W_ibd
 def generator(inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob, n_samples=1, noise_dim=100, reuse=False):
     """ Generate samples for A,B and DELTA 
         Returns:
@@ -126,8 +87,8 @@ def generator(inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob, n_samples=1
         #M = tf.Print(M,[M],message="M output generator")
         #M = cloglog(logits_gumbel)
         variable_summaries(M,name="M_generator")
-        M_cnp,M_diabetes,M_gluten,M_ibd,M_lactose,M_quino,W_cnp,W_diabetes,W_gluten,W_ibd,W_lactose,W_quino=generate_classifier(latent_dim,n_samples,keep_prob,reuse=reuse)
-    return U,V,B,del_sample,M,M_cnp,M_diabetes,M_gluten,M_ibd,M_lactose,M_quino,W_cnp,W_diabetes,W_gluten,W_ibd,W_lactose,W_quino
+        M_gluten,M_ibd,W_gluten,W_ibd=generate_classifier(latent_dim,n_samples,keep_prob,reuse=reuse)
+    return U,V,B,del_sample,M,M_gluten,M_ibd,W_gluten,W_ibd
 
 def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_cov_dim, latent_dim, rank,keep_prob, n_samples = 100):
     # n_samples = 100
@@ -155,7 +116,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     p_samples_Mquino = gumbel_softmax(tf.ones([n_samples, latent_dim,2]), tf.constant(0.01, dtype=tf.float32,shape=(n_samples,1)))
     p_samples_Mquino = tf.squeeze(tf.slice(p_samples_Mquino,[0,0,0],[-1,-1,1]),axis=2)
     p_samples_M = tf.squeeze(tf.slice(p_samples_M,[0,0,0,0],[-1,-1,-1,1]),axis=3)
-    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M, q_samples_Mcnp, q_samples_Mdiabetes,q_samples_Mgluten,q_samples_Mibd,q_samples_Mlactose,q_samples_Mquino,q_samples_W_cnp,q_samples_W_diabetes,q_samples_W_gluten,q_samples_W_ibd,q_samples_W_lactose,q_samples_W_quino = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples, reuse=True)
+    q_samples_U, q_samples_V, q_samples_B, q_samples_D, q_samples_M, q_samples_Mgluten,q_samples_Mibd,q_samples_W_gluten,q_samples_W_ibd = generator(inp_data_dim,inp_cov_dim,latent_dim,rank,keep_prob,n_samples=n_samples, reuse=True)
 
     variable_summaries(p_samples_M, name="p_samples_M")
     variable_summaries(q_samples_M, name="q_samples_M")
@@ -169,7 +130,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_u = correct_labels_adv/(2*n_samples)
     label_acc_adv_u = tf.Print(label_acc_adv_u, [label_acc_adv_u], message="label_acc_adv_u")
     dloss_u = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = V_ratio(p_samples_V,latent_dim,rank)
     q_ratio = V_ratio(q_samples_V,latent_dim,rank, reuse=True)
@@ -180,7 +141,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_v = correct_labels_adv/(2*n_samples)
     dloss_v = d_loss_d+d_loss_i
     label_acc_adv_v = tf.Print(label_acc_adv_v, [label_acc_adv_v], message="label_acc_adv_v")
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = B_ratio(p_samples_B,inp_data_dim,inp_cov_dim)
     q_ratio = B_ratio(q_samples_B,inp_data_dim,inp_cov_dim, reuse=True)
@@ -190,7 +151,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_b = correct_labels_adv/(2*n_samples)
     label_acc_adv_b = tf.Print(label_acc_adv_b, [label_acc_adv_b], message="label_acc_adv_b")
     dloss_b = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = D_ratio(p_samples_D)
     q_ratio = D_ratio(q_samples_D, reuse=True)
@@ -200,7 +161,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_d = correct_labels_adv/(2*n_samples)
     label_acc_adv_d = tf.Print(label_acc_adv_d, [label_acc_adv_d], message="label_acc_adv_d")
     dloss_d = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = M_ratio(p_samples_M,inp_data_dim, latent_dim)
     q_ratio = M_ratio(q_samples_M,inp_data_dim, latent_dim, reuse=True)
@@ -210,27 +171,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_m = correct_labels_adv/(2*n_samples)
     label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_m")
     dloss_m = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    p_ratio = Mcnp_ratio(p_samples_Mcnp)
-    q_ratio = Mcnp_ratio(q_samples_Mcnp, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_mcnp = correct_labels_adv/(2*n_samples)
-    label_acc_adv_mcnp = tf.Print(label_acc_adv_mcnp, [label_acc_adv_mcnp], message="label_acc_adv_mcnp")
-    dloss_mcnp = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    p_ratio = Mdiabetes_ratio(p_samples_Mdiabetes)
-    q_ratio = Mdiabetes_ratio(q_samples_Mdiabetes, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_mdiabetes = correct_labels_adv/(2*n_samples)
-    label_acc_adv_mdiabetes = tf.Print(label_acc_adv_mdiabetes, [label_acc_adv_mdiabetes], message="label_acc_adv_mdiabetes")
-    dloss_mdiabetes = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = Mgluten_ratio(p_samples_Mgluten)
     q_ratio = Mgluten_ratio(q_samples_Mgluten, reuse=True)
@@ -240,7 +181,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mgluten = correct_labels_adv/(2*n_samples)
     label_acc_adv_mgluten = tf.Print(label_acc_adv_mgluten, [label_acc_adv_mgluten], message="label_acc_adv_mgluten")
     dloss_mgluten = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = Mibd_ratio(p_samples_Mibd)
     q_ratio = Mibd_ratio(q_samples_Mibd, reuse=True)
@@ -250,47 +191,8 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mibd = correct_labels_adv/(2*n_samples)
     label_acc_adv_mibd = tf.Print(label_acc_adv_mibd, [label_acc_adv_mibd], message="label_acc_adv_mibd")
     dloss_mibd = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
-    p_ratio = Mlactose_ratio(p_samples_Mlactose)
-    q_ratio = Mlactose_ratio(q_samples_Mlactose, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_mlactose = correct_labels_adv/(2*n_samples)
-    label_acc_adv_mlactose = tf.Print(label_acc_adv_mlactose, [label_acc_adv_mlactose], message="label_acc_adv_mlactose")
-    dloss_mlactose = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    p_ratio = Mquino_ratio(p_samples_Mquino)
-    q_ratio = Mquino_ratio(q_samples_Mquino, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_mquino = correct_labels_adv/(2*n_samples)
-    label_acc_adv_mquino = tf.Print(label_acc_adv_mquino, [label_acc_adv_mquino], message="label_acc_adv_mquino")
-    dloss_mquino = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    p_ratio = Wcnp_ratio(p_samples_W_cnp)
-    q_ratio = Wcnp_ratio(q_samples_W_cnp, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_wcnp = correct_labels_adv/(2*n_samples)
-    label_acc_adv_wcnp = tf.Print(label_acc_adv_wcnp, [label_acc_adv_wcnp], message="label_acc_adv_wcnp")
-    dloss_wcnp = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    p_ratio = Wdiabetes_ratio(p_samples_W_diabetes)
-    q_ratio = Wdiabetes_ratio(q_samples_W_diabetes, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_wdiabetes = correct_labels_adv/(2*n_samples)
-    label_acc_adv_wdiabetes = tf.Print(label_acc_adv_wdiabetes, [label_acc_adv_wdiabetes], message="label_acc_adv_wdiabetes")
-    dloss_wdiabetes = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
 
     p_ratio = Wgluten_ratio(p_samples_W_gluten)
     q_ratio = Wgluten_ratio(q_samples_W_gluten, reuse=True)
@@ -300,7 +202,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_wgluten = correct_labels_adv/(2*n_samples)
     label_acc_adv_wgluten = tf.Print(label_acc_adv_wgluten, [label_acc_adv_wgluten], message="label_acc_adv_wgluten")
     dloss_wgluten = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
     p_ratio = Wibd_ratio(p_samples_W_ibd)
     q_ratio = Wibd_ratio(q_samples_W_ibd, reuse=True)
@@ -310,34 +212,14 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_wibd = correct_labels_adv/(2*n_samples)
     label_acc_adv_wibd = tf.Print(label_acc_adv_wibd, [label_acc_adv_wibd], message="label_acc_adv_wibd")
     dloss_wibd = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
+    q_ratio_m += p_ratio
 
-    p_ratio = Wlactose_ratio(p_samples_W_lactose)
-    q_ratio = Wlactose_ratio(q_samples_W_lactose, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_wlactose = correct_labels_adv/(2*n_samples)
-    label_acc_adv_wlactose = tf.Print(label_acc_adv_wlactose, [label_acc_adv_wlactose], message="label_acc_adv_wlactose")
-    dloss_wlactose = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
 
-    p_ratio = Wquino_ratio(p_samples_W_quino)
-    q_ratio = Wquino_ratio(q_samples_W_quino, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=p_ratio, labels=tf.ones_like(p_ratio)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=q_ratio, labels=tf.zeros_like(q_ratio)))
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),1),tf.float32))
-    label_acc_adv_wquino = correct_labels_adv/(2*n_samples)
-    label_acc_adv_wquino = tf.Print(label_acc_adv_wquino, [label_acc_adv_wquino], message="label_acc_adv_wquino")
-    dloss_wquino = d_loss_d+d_loss_i
-    q_ratio_m += q_ratio
-
-    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+30*(dloss_mcnp+dloss_mdiabetes+dloss_mgluten+dloss_mibd+dloss_mlactose+dloss_mquino)+dloss_wcnp+dloss_wdiabetes+dloss_wgluten+dloss_wibd+dloss_wibd+dloss_wlactose+dloss_wquino
-
+    dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+30*(dloss_mgluten+dloss_mibd)+dloss_wgluten+dloss_wibd
     #Adversary Accuracy
     # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(p_ratio),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(q_ratio),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m+label_acc_adv_mcnp+label_acc_adv_mdiabetes+label_acc_adv_mgluten+label_acc_adv_mibd+label_acc_adv_mlactose+label_acc_adv_mquino+label_acc_adv_wcnp+label_acc_adv_wdiabetes+label_acc_adv_wgluten+label_acc_adv_wibd+label_acc_adv_wlactose+label_acc_adv_wquino)/17.0
-    label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")   
+    label_acc_adv_theta = (label_acc_adv_b+label_acc_adv_d+label_acc_adv_u+label_acc_adv_v+label_acc_adv_m+label_acc_adv_mgluten+label_acc_adv_mibd+label_acc_adv_wgluten+label_acc_adv_wibd)/17.0
+    label_acc_adv_theta = tf.Print(label_acc_adv_theta, [label_acc_adv_theta], message="label_acc_adv_theta")
     return dloss, label_acc_adv_theta, q_ratio_m
 
 

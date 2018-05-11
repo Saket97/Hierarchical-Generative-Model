@@ -133,8 +133,8 @@ def train(z, label_acc_adv_theta):
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,eps,reuse=True)
     U_test,V_test,D_test,M_test = generator(inp_data_dim,latent_dim,rank,n_samples=500, reuse=True)
-    #A_old = tf.matmul(U_test,V_test)
-    A_old = U_test
+    A_old = tf.matmul(U_test,V_test)
+    #A_old = U_test
     A = A_old*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))
     prec = tf.square(D_test)
@@ -209,8 +209,8 @@ if __name__ == "__main__":
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
-    #A1 = tf.matmul(U1,V1)
-    A1 = U1
+    A1 = tf.matmul(U1,V1)
+    #A1 = U1
     A1 = A1*M1
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
     # Draw samples from posterior q(z2|x)

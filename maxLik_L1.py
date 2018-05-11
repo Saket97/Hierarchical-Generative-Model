@@ -16,19 +16,19 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=40
-nepoch = 1001
+latent_dim=20
+nepoch = 2101
 lr = 10**(-4)
-batch_size = 10
-ntrain = 30
-test_batch_size = 20
-ntest=20
+batch_size = 160
+ntrain = 160
+test_batch_size = 40
+ntest=40
 inp_data_dim = 1000
 eps_dim = 40
 eps_nbasis=32
 n_clf_epoch = 5000
 thresh_adv = 0.5
-rank = 30
+rank = 20
 
 """ tensorboard """
 parser = argparse.ArgumentParser()
@@ -39,7 +39,8 @@ if tf.gfile.Exists(FLAGS.logdir):
 tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
-    raw_data = np.load("x.npy")
+    raw_data = np.load("/opt/data/saket/toy/x.npy")
+    #raw_data = np.log10(raw_data+0.1)
     global inp_data_dim
     inp_data_dim = raw_data.shape[1]
     m = np.mean(raw_data, axis=0)
@@ -90,7 +91,7 @@ def train(z, label_acc_adv_theta):
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if var.name.startswith("data_net")]
     tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M") or var.name.startswith("Mtb") or var.name.startswith("Mactive") or var.name.startswith("Mlatent") or var.name.startswith("Mhiv") or var.name.startswith("Wtb") or var.name.startswith("Wactive") or var.name.startswith("Wlatent") or var.name.startswith("Whiv"))]
-    tp_var = [var for var in t_vars if var not in d_vars+c_vars+tr_vars]
+    tp_var = [var for var in t_vars if var not in d_vars+tr_vars]
     #print("tp_var:",tp_var)
     #print("tr_var:",tr_vars)
     assert(len(tp_var)+len(d_vars)+len(tr_vars) == len(t_vars))
@@ -123,13 +124,17 @@ def train(z, label_acc_adv_theta):
             capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
     adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
 
+    #primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
+    #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
+    #adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,eps,reuse=True)
-    U_test,V_test,D_test = generator(inp_data_dim,latent_dim,rank,n_samples=500, reuse=True)
-    A_old = tf.matmul(U_test,V_test)
+    U_test,V_test,D_test,M_test = generator(inp_data_dim,latent_dim,rank,n_samples=500, reuse=True)
+    #A_old = tf.matmul(U_test,V_test)
+    A_old = U_test
     A = A_old*M_test
     means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))
     prec = tf.square(D_test)
@@ -156,7 +161,6 @@ def train(z, label_acc_adv_theta):
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
-            cmb = C_train[j*batch_size:(j+1)*batch_size]
             sess.run(train_op, feed_dict={x:xmb})
             for gen in range(1):
                 sess.run(adversary_theta_train_op, feed_dict={x:xmb})
@@ -172,7 +176,7 @@ def train(z, label_acc_adv_theta):
             train_writer.add_run_metadata(run_metadata, 'step %i'%(i))
             train_writer.add_summary(summary, i)
 
-        if i%100 == 0:
+        if i%500 == 0:
             test_lik_list = []
             for i in range(100):
                 test_lik = sess.run(x_post_prob_log_test)
@@ -185,7 +189,9 @@ def train(z, label_acc_adv_theta):
             print("Model saved at ",path)
     
     # Save the summary data for analysis
-    A_,DELTA_inv_ = sess.run([A_old,DELTA_inv])
+    A_,DELTA_inv_,M_test = sess.run([A_old,DELTA_inv,M_test])
+    M_test = M_test[0]
+    np.save("M.npy",M_test)
     np.save("vtp_loss1.npy", vtp_list)
     #np.save("x_post_list1.npy",post_test_list)
     np.save("A1.npy",np.mean(A_, axis=0))
@@ -199,11 +205,12 @@ if __name__ == "__main__":
     eps = tf.random_normal([batch_size, eps_dim])
 
     n_samples=4
-    U,V,DELTA_inv = generator(inp_data_dim,latent_dim,rank,n_samples=n_samples)
+    U,V,DELTA_inv,M = generator(inp_data_dim,latent_dim,rank,n_samples=n_samples)
     U1 = tf.slice(U,[0,0,0],[1,-1,-1])
     V1 = tf.slice(V,[0,0,0],[1,-1,-1])
     M1 = tf.slice(M,[0,0,0],[1,-1,-1])
-    A1 = tf.matmul(U1,V1)
+    #A1 = tf.matmul(U1,V1)
+    A1 = U1
     A1 = A1*M1
     DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
     # Draw samples from posterior q(z2|x)
@@ -246,7 +253,7 @@ if __name__ == "__main__":
     label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Ti)
+    t1 = -tf.reduce_mean(Td)
     t2 = x_post_prob_log
     t5 = logz-logr
     t3 = q_ratio

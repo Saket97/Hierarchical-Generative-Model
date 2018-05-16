@@ -16,8 +16,8 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=20
-nepoch = 2101
+latent_dim=60
+nepoch = 3101
 lr = 10**(-4)
 batch_size = 160
 ntrain = 160
@@ -124,9 +124,9 @@ def train(z, label_acc_adv_theta):
             capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
     adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
 
-    #primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
-    #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
-    #adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
+    adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
+    adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph

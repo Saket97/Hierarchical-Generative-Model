@@ -19,10 +19,10 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 latent_dim=60
 nepoch = 1001
 lr = 10**(-4)
-batch_size = 150
-ntrain = 300
-test_batch_size = 34
-ntest=34
+batch_size = 144
+ntrain = 288
+test_batch_size = 32
+ntest=32
 inp_data_dim = 4732
 inp_cov_dim = 3
 eps_dim = 40
@@ -34,13 +34,18 @@ num_hiv_classes = 2
 num_tb_classes = 2
 tb_coeff = 40
 hiv_coeff = 30
+fold_size = 32
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
+parser.add_argument('--num',type=int,default=10)
 FLAGS, unparsed = parser.parse_known_args()
 if tf.gfile.Exists(FLAGS.logdir):
     tf.gfile.DeleteRecursively(FLAGS.logdir)
 tf.gfile.MakeDirs(FLAGS.logdir)
+
+def get_train():
+
 
 def load_dataset():
     raw_data = np.load("/opt/data/saket/gene_data/data/mod_gauss_data.npy")
@@ -49,6 +54,10 @@ def load_dataset():
     labels_tb = np.load("/opt/data/saket/gene_data/data/tb.npy")
     labels = np.squeeze(labels)
     labels_tb = np.squeeze(labels_tb)
+    raw_data = raw_data[0:fold_size*10]
+    cov = cov[0:fold_size*10]
+    labels = labels[0:fold_size*10]
+    labels_tb = labels_tb[0:fold_size*10]
     global inp_data_dim
     global inp_cov_dim
     inp_data_dim = raw_data.shape[1]
@@ -56,7 +65,20 @@ def load_dataset():
     m = np.mean(raw_data, axis=0)
     raw_data = (raw_data-m)/5.0
     #cov = (np.log10(cov+0.1))/5.0
-    return raw_data[0:ntrain],cov[0:ntrain],labels[0:ntrain],labels_tb[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels[ntrain:],labels_tb[ntrain:]
+    n = Flags.num
+    start = (n-1)*fold_size
+    end = n*fold_size
+    X_test_ld = raw_data[start:end]
+    C_test_ld = cov[start:end]
+    L_test_ld = labels[start:end]
+    Ltb_test1_ld = labels_tb[start:end]
+    mask = np.ones(raw_data.shape[0],dtype=bool)
+    mask[start:end] = False
+    X_train_ld = raw_data[mask,...]
+    C_train_ld = cov[mask,...]
+    L_train_ld = labels[mask,...]
+    Ltb_train_ld = labels_tb[mask,...]
+    return X_train_ld,C_train_ld,L_train_ld,Ltb_train_ld,X_test_ld,C_test_ld,L_test_ld,Ltb_test1_ld
 
 X_train, C_train, L_train, Ltb_train, X_test, C_test, L_test, Ltb_test1 = load_dataset()
 print("inp_data_dim:",inp_data_dim)
@@ -174,9 +196,6 @@ def train(z, closs, label_acc_adv_theta):
         if grad is not None:
             capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
     adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
-
-
-
 
     #adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss, var_list=d_vars)
     #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
@@ -345,10 +364,10 @@ def train(z, closs, label_acc_adv_theta):
     np.save("B1.npy",np.mean(B_,axis=0))
     np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
     np.save("clf_loss_list1.npy",clf_loss_list)
-    np.save("test_lik.npy",test_lik_list1)
+    np.save("test_lik_%d.npy"%(FLAGS.num),test_lik_list1)
     np.save("test_acc.npy",test_acc_list)
     np.save("M1.npy",M_test_)
-    np.save("auc.npy",auc)
+    np.save("auc_%d.npy"%(FLAGS.num),auc)
     np.save("Mtb.npy",Mtb_test_)
     np.save("Mactive.npy",Mactive_test_)
     np.save("Mlatent.npy",Mlatent_test_)

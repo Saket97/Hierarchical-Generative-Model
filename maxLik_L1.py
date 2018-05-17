@@ -74,6 +74,7 @@ def load_dataset():
     Libd_test_ld = labels_ibd[start:end]
     mask = np.ones(raw_data.shape[0],dtype=bool)
     mask[start:end] = False
+    mask[10*fold_size:] = False
     X_train_ld = raw_data[mask,...]
     C_train_ld = cov[mask,...]
     Lgluten_train_ld = labels_gluten[mask,...]
@@ -93,7 +94,7 @@ def next_minibatch():
     quino0 = (Lquino_train==0).nonzero()[0]
     quino1 = (Lquino_train==1).nonzero()[0]
 #    indices = np.concatenate([np.random.choice(cnp0,80),np.random.choice(cnp1,80),np.random.choice(db0,20),np.random.choice(db1,20),np.random.choice(ibd0,90),np.random.choice(ibd1,30),np.random.choice(quino0,30),np.random.choice(quino1,30)])
-    indices = np.concatenate([np.random.choice(gl0,200),np.random.choice(gl1,200),np.random.choice(ibd1,40)])
+    indices = np.concatenate([np.random.choice(gl0,300),np.random.choice(gl1,200),np.random.choice(ibd1,40)])
     xmb = X_train[indices,:]
     cmb = C_train[indices,:]
     cnp_mb = Lcnp_train[indices]

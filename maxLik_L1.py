@@ -19,10 +19,10 @@ graph_replace = tf.contrib.graph_editor.graph_replace
 latent_dim=30
 nepoch = 2401
 lr = 10**(-4)
-batch_size = 440
-ntrain = 1000
-test_batch_size = 207
-ntest=207
+batch_size = 540
+ntrain = 120*9
+test_batch_size = 120
+ntest=120
 inp_data_dim = 5000
 inp_cov_dim = 7
 eps_dim = 40
@@ -33,9 +33,11 @@ rank = 15
 num_hiv_classes = 2
 num_tb_classes = 2
 tb_coeff = 60
+fold_size=120
 """ tensorboard """
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir',type=str,default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),'tensorflow/mnist/logs/mnist_with_summaries'),help='Summaries log directory')
+parser.add_argument("--num", type=int, default=10)
 FLAGS, unparsed = parser.parse_known_args()
 if tf.gfile.Exists(FLAGS.logdir):
     tf.gfile.DeleteRecursively(FLAGS.logdir)
@@ -63,7 +65,21 @@ def load_dataset():
     m = np.mean(raw_data, axis=0)
     raw_data = (raw_data-m)/4.0
     cov = (np.log10(cov+0.1))
-    return raw_data[0:ntrain],cov[0:ntrain],labels_cnp[0:ntrain],labels_diabetes[0:ntrain],labels_gluten[0:ntrain],labels_ibd[0:ntrain],labels_lactose[0:ntrain],labels_quino[0:ntrain],raw_data[ntrain:],cov[ntrain:],labels_cnp[ntrain:],labels_diabetes[ntrain:],labels_gluten[ntrain:],labels_ibd[ntrain:],labels_lactose[ntrain:],labels_quino[ntrain:]
+    n = FLAGS.num
+    start = (n-1)*fold_size
+    end = n*fold_size
+    X_test_ld = raw_data[start:end]
+    C_test_ld = cov[start:end]
+    Lgluten_test_ld = labels_gluten[start:end]
+    Libd_test_ld = labels_ibd[start:end]
+    mask = np.ones(raw_data.shape[0],dtype=bool)
+    mask[start:end] = False
+    X_train_ld = raw_data[mask,...]
+    C_train_ld = cov[mask,...]
+    Lgluten_train_ld = labels_gluten[mask,...]
+    Libd_train_ld = labels_ibd[mask,...]
+    X_train_ld = raw_data[]
+    return X_train_ld,C_train_ld,labels_cnp[0:ntrain],labels_diabetes[0:ntrain],Lgluten_train_ld,Libd_train_ld,labels_lactose[0:ntrain],labels_quino[0:ntrain],X_test_ld,C_test_ld,labels_cnp[ntrain:ntrain+ntest],labels_diabetes[ntrain:ntrain+ntest],Lgluten_test_ld,Libd_test_ld,labels_lactose[ntrain:ntrain+ntest],labels_quino[ntrain:ntrain+ntest]
 
 X_train, C_train, Lcnp_train, Ldiabetes_train, Lgluten_train, Libd_train, Llactose_train, Lquino_train, X_test, C_test, Lcnp_test, Ldiabetes_test, Lgluten_test, Libd_test, Llactose_test, Lquino_test = load_dataset()
 def next_minibatch():
@@ -322,10 +338,10 @@ def train(z, closs, label_acc_adv_theta):
     np.save("B1.npy",np.mean(B_,axis=0))
     np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
     np.save("clf_loss_list1.npy",clf_loss_list)
-    np.save("test_lik.npy",test_lik_list1)
+    np.save("test_lik_%d.npy"%(FLAGS.num),test_lik_list1)
     np.save("test_acc.npy",test_acc_list)
     np.save("M1.npy",M_test_)
-    np.save("auc.npy",auc)
+    np.save("auc_%d.npy"%(FLAGS.num),auc)
     np.save("Mgluten.npy",Mgluten_test_)
     np.save("Mibd.npy",Mibd_test_)
     ## Test Set

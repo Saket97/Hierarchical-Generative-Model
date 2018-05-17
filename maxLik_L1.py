@@ -44,7 +44,6 @@ if tf.gfile.Exists(FLAGS.logdir):
     tf.gfile.DeleteRecursively(FLAGS.logdir)
 tf.gfile.MakeDirs(FLAGS.logdir)
 
-def get_train():
 
 
 def load_dataset():
@@ -65,7 +64,7 @@ def load_dataset():
     m = np.mean(raw_data, axis=0)
     raw_data = (raw_data-m)/5.0
     #cov = (np.log10(cov+0.1))/5.0
-    n = Flags.num
+    n = FLAGS.num
     start = (n-1)*fold_size
     end = n*fold_size
     X_test_ld = raw_data[start:end]
@@ -410,8 +409,8 @@ if __name__ == "__main__":
     c = tf.placeholder(tf.float32, shape=(batch_size, inp_cov_dim))
     z_sampled = tf.random_normal([batch_size, latent_dim])
     labels = tf.placeholder(tf.int64, shape=(None))
-    reverse_kl = tf.placeholder_with_default(1.0,())
-    pearson = tf.placeholder_with_default(0.0,())
+    reverse_kl = tf.placeholder_with_default(0.0,())
+    pearson = tf.placeholder_with_default(1.0,())
     labels_tb = tf.placeholder(tf.int64, shape=(None))
     labels_active = tf.placeholder(tf.int64, shape=(None))
     labels_latent = tf.placeholder(tf.int64, shape=(None))
@@ -498,7 +497,7 @@ if __name__ == "__main__":
     label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Ti)
+    t1 = -tf.reduce_mean(Td)
     t2 = x_post_prob_log
     t5 = logz-logr
     t3 = q_ratio

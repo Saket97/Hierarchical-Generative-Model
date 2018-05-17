@@ -140,7 +140,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_u = correct_labels_adv/(2*n_samples)
     label_acc_adv_u = tf.Print(label_acc_adv_u, [label_acc_adv_u], message="label_acc_adv_u")
     dloss_u = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = V_ratio(p_samples_V,latent_dim,rank)
     q_ratio = V_ratio(q_samples_V,latent_dim,rank, reuse=True)
@@ -151,7 +151,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_v = correct_labels_adv/(2*n_samples)
     dloss_v = d_loss_d+d_loss_i
     label_acc_adv_v = tf.Print(label_acc_adv_v, [label_acc_adv_v], message="label_acc_adv_v")
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = B_ratio(p_samples_B,inp_data_dim,inp_cov_dim)
     q_ratio = B_ratio(q_samples_B,inp_data_dim,inp_cov_dim, reuse=True)
@@ -161,7 +161,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_b = correct_labels_adv/(2*n_samples)
     label_acc_adv_b = tf.Print(label_acc_adv_b, [label_acc_adv_b], message="label_acc_adv_b")
     dloss_b = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = D_ratio(p_samples_D)
     q_ratio = D_ratio(q_samples_D, reuse=True)
@@ -171,7 +171,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_d = correct_labels_adv/(2*n_samples)
     label_acc_adv_d = tf.Print(label_acc_adv_d, [label_acc_adv_d], message="label_acc_adv_d")
     dloss_d = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = M_ratio(p_samples_M,inp_data_dim, latent_dim)
     q_ratio = M_ratio(q_samples_M,inp_data_dim, latent_dim, reuse=True)
@@ -181,7 +181,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_m = correct_labels_adv/(2*n_samples)
     label_acc_adv_m = tf.Print(label_acc_adv_m, [label_acc_adv_m], message="label_acc_adv_m")
     dloss_m = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Mtb_ratio(p_samples_Mtb)
     q_ratio = Mtb_ratio(q_samples_Mtb, reuse=True)
@@ -191,7 +191,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mtb = correct_labels_adv/(2*n_samples)
     label_acc_adv_mtb = tf.Print(label_acc_adv_mtb, [label_acc_adv_mtb], message="label_acc_adv_mtb")
     dloss_mtb = d_loss_d+d_loss_i
-    q_ratio_m += 40*tf.reduce_mean(p_ratio)
+    q_ratio_m += 40*tf.reduce_mean(q_ratio)
 
     p_ratio = Mactive_ratio(p_samples_Mactive)
     q_ratio = Mactive_ratio(q_samples_Mactive, reuse=True)
@@ -201,7 +201,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mactive = correct_labels_adv/(2*n_samples)
     label_acc_adv_mactive = tf.Print(label_acc_adv_mactive, [label_acc_adv_mactive], message="label_acc_adv_mactive")
     dloss_mactive = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Mlatent_ratio(p_samples_Mlatent)
     q_ratio = Mlatent_ratio(q_samples_Mlatent, reuse=True)
@@ -211,7 +211,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mlatent = correct_labels_adv/(2*n_samples)
     label_acc_adv_mlatent = tf.Print(label_acc_adv_mlatent, [label_acc_adv_mlatent], message="label_acc_adv_mlatent")
     dloss_mlatent = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Mhiv_ratio(p_samples_Mhiv)
     q_ratio = Mhiv_ratio(q_samples_Mhiv, reuse=True)
@@ -221,7 +221,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_mhiv = correct_labels_adv/(2*n_samples)
     label_acc_adv_mhiv = tf.Print(label_acc_adv_mhiv, [label_acc_adv_mhiv], message="label_acc_adv_mhiv")
     dloss_mhiv = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Wtb_ratio(p_samples_W_tb)
     q_ratio = Wtb_ratio(q_samples_W_tb, reuse=True)
@@ -231,7 +231,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_wtb = correct_labels_adv/(2*n_samples)
     label_acc_adv_wtb = tf.Print(label_acc_adv_wtb, [label_acc_adv_wtb], message="label_acc_adv_wtb")
     dloss_wtb = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Wactive_ratio(p_samples_W_active)
     q_ratio = Wactive_ratio(q_samples_W_active, reuse=True)
@@ -241,7 +241,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_wactive = correct_labels_adv/(2*n_samples)
     label_acc_adv_wactive = tf.Print(label_acc_adv_wactive, [label_acc_adv_wactive], message="label_acc_adv_wactive")
     dloss_wactive = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Wlatent_ratio(p_samples_W_latent)
     q_ratio = Wlatent_ratio(q_samples_W_latent, reuse=True)
@@ -251,7 +251,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_wlatent = correct_labels_adv/(2*n_samples)
     label_acc_adv_wlatent = tf.Print(label_acc_adv_wlatent, [label_acc_adv_wlatent], message="label_acc_adv_wlatent")
     dloss_wlatent = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     p_ratio = Whiv_ratio(p_samples_W_hiv)
     q_ratio = Whiv_ratio(q_samples_W_hiv, reuse=True)
@@ -261,7 +261,7 @@ def cal_theta_adv_loss(q_samples_A, q_samples_B, q_samples_D, inp_data_dim, inp_
     label_acc_adv_whiv = correct_labels_adv/(2*n_samples)
     label_acc_adv_whiv = tf.Print(label_acc_adv_whiv, [label_acc_adv_whiv], message="label_acc_adv_whiv")
     dloss_whiv = d_loss_d+d_loss_i
-    q_ratio_m += tf.reduce_mean(p_ratio)
+    q_ratio_m += tf.reduce_mean(q_ratio)
 
     dloss = dloss_u+dloss_v+dloss_b+dloss_d+dloss_m+30*(dloss_mtb+dloss_mactive+dloss_mlatent+dloss_mhiv)+dloss_wtb+dloss_wactive+dloss_wlatent+dloss_whiv
     

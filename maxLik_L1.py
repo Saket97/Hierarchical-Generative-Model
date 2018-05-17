@@ -44,14 +44,14 @@ if tf.gfile.Exists(FLAGS.logdir):
 tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
-    raw_data = np.load("data/data_micro/mod_feat_micro.npy")
-    cov = np.load("data/data_micro/micro_cov.npy")
-    labels_cnp = np.load("data/data_micro/micro_label_cnp.npy")
-    labels_diabetes = np.load("data/data_micro/micro_label_diabetes.npy")
-    labels_gluten = np.load("data/data_micro/micro_label_gluten.npy")
-    labels_ibd = np.load("data/data_micro/micro_label_ibd.npy")
-    labels_lactose = np.load("data/data_micro/micro_label_lactose.npy")
-    labels_quino = np.load("data/data_micro/micro_label_quinoline.npy")
+    raw_data = np.load("/opt/data/saket/gene_data/data/mod_feat_micro.npy")
+    cov = np.load("/opt/data/saket/gene_data/data/micro_cov.npy")
+    labels_cnp = np.load("/opt/data/saket/gene_data/data/micro_label_cnp.npy")
+    labels_diabetes = np.load("/opt/data/saket/gene_data/data/micro_label_diabetes.npy")
+    labels_gluten = np.load("/opt/data/saket/gene_data/data/micro_label_gluten.npy")
+    labels_ibd = np.load("/opt/data/saket/gene_data/data/micro_label_ibd.npy")
+    labels_lactose = np.load("/opt/data/saket/gene_data/data/micro_label_lactose.npy")
+    labels_quino = np.load("/opt/data/saket/gene_data/data/micro_label_quinoline.npy")
     labels_cnp = np.squeeze(labels_cnp)
     labels_diabetes = np.squeeze(labels_diabetes)
     labels_gluten = np.squeeze(labels_gluten)
@@ -78,7 +78,6 @@ def load_dataset():
     C_train_ld = cov[mask,...]
     Lgluten_train_ld = labels_gluten[mask,...]
     Libd_train_ld = labels_ibd[mask,...]
-    X_train_ld = raw_data[]
     return X_train_ld,C_train_ld,labels_cnp[0:ntrain],labels_diabetes[0:ntrain],Lgluten_train_ld,Libd_train_ld,labels_lactose[0:ntrain],labels_quino[0:ntrain],X_test_ld,C_test_ld,labels_cnp[ntrain:ntrain+ntest],labels_diabetes[ntrain:ntrain+ntest],Lgluten_test_ld,Libd_test_ld,labels_lactose[ntrain:ntrain+ntest],labels_quino[ntrain:ntrain+ntest]
 
 X_train, C_train, Lcnp_train, Ldiabetes_train, Lgluten_train, Libd_train, Llactose_train, Lquino_train, X_test, C_test, Lcnp_test, Ldiabetes_test, Lgluten_test, Libd_test, Llactose_test, Lquino_test = load_dataset()

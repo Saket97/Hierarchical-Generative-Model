@@ -92,67 +92,47 @@ def encoder(x, eps=None, n_layer=1, n_hidden=128, reuse=False):
     return z,Ez,Varz
 
 def train(z, label_acc_adv_theta):
-    t_vars = tf.trainable_variables()
-    d_vars = [var for var in t_vars if var.name.startswith("data_net")]
-    tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M") or var.name.startswith("Mtb") or var.name.startswith("Mactive") or var.name.startswith("Mlatent") or var.name.startswith("Mhiv") or var.name.startswith("Wtb") or var.name.startswith("Wactive") or var.name.startswith("Wlatent") or var.name.startswith("Whiv"))]
-    tp_var = [var for var in t_vars if var not in d_vars+tr_vars]
+    # t_vars = tf.trainable_variables()
+    # d_vars = [var for var in t_vars if var.name.startswith("data_net")]
+    # tr_vars = [var for var in t_vars if (var.name.startswith("U") or var.name.startswith("V") or var.name.startswith("B") or var.name.startswith("del") or var.name.startswith("M") or var.name.startswith("Mtb") or var.name.startswith("Mactive") or var.name.startswith("Mlatent") or var.name.startswith("Mhiv") or var.name.startswith("Wtb") or var.name.startswith("Wactive") or var.name.startswith("Wlatent") or var.name.startswith("Whiv"))]
+    # tp_var = [var for var in t_vars if var not in d_vars+tr_vars]
     #print("tp_var:",tp_var)
     #print("tr_var:",tr_vars)
-    assert(len(tp_var)+len(d_vars)+len(tr_vars) == len(t_vars))
+    # assert(len(tp_var)+len(d_vars)+len(tr_vars) == len(t_vars))
     
     r_loss = tf.losses.get_regularization_loss()
     primal_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
-    dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
-    dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
+    # dual_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
+    # dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_grad = primal_optimizer.compute_gradients(primal_loss, var_list=tp_var)
+    primal_grad = primal_optimizer.compute_gradients(primal_loss)
     capped_g_grad = []
     for grad,var in primal_grad:
         if grad is not None:
             capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
     primal_train_op = primal_optimizer.apply_gradients(capped_g_grad)
 
-    adversary_grad = dual_optimizer.compute_gradients(dual_loss+r_loss,var_list=d_vars)
-    capped_g_grad = []
-    for grad,var in adversary_grad:
-        if grad is not None:
-            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
-    adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
+    # adversary_grad = dual_optimizer.compute_gradients(dual_loss+r_loss,var_list=d_vars)
+    # capped_g_grad = []
+    # for grad,var in adversary_grad:
+    #     if grad is not None:
+    #         capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    # adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
   
-    #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
-    adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta, var_list=tr_vars)
-    capped_g_grad = []
-    for grad,var in adversary_theta_grad:
-        if grad is not None:
-            capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
-    adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
+    # #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    # adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta, var_list=tr_vars)
+    # capped_g_grad = []
+    # for grad,var in adversary_theta_grad:
+    #     if grad is not None:
+    #         capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
+    # adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss, var_list=tp_var)
-    adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
-    adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta, var_list=tr_vars)
-    train_op = tf.group(primal_train_op, adversary_train_op)
+    primal_train_op = primal_optimizer.minimize(primal_loss)
+    # adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
+    # adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta, var_list=tr_vars)
+    # train_op = tf.group(primal_train_op, adversary_train_op)
     
-    # Test Set Graph
-    eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
-    z_test, _, _ = encoder(X_test,eps,reuse=True)
-    U_test,V_test,D_test,M_test = generator(inp_data_dim,latent_dim,rank,n_samples=500, reuse=True)
-    #A_old = tf.matmul(U_test,V_test)
-    A_old = U_test
-    A = A_old*M_test
-    print("z_test shape:",Z_test.shape)
-    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],Z_test.shape[0],latent_dim])*Z_test,tf.transpose(A, perm=[0,2,1]))
-    prec = tf.square(D_test)
-    prec = tf.square(delta)
-    t = (X_test-means)
-    t1 = t*tf.expand_dims(prec, axis=1)*t
-    t1 = -0.5*tf.reduce_sum(t1, axis=2)
-    t2 = 0.5*tf.expand_dims(tf.reduce_sum(tf.log(1e-3+prec), axis=1), axis=1)
-    t3 = -inp_data_dim*0.5*tf.log(2*math.pi)
-    x_post_prob_log_test = t1+t2+t3
-    #x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=1)
-    x_post_prob_log_test = tf.reduce_mean(x_post_prob_log_test, axis=0) # expect wrt theta
-        
     saver = tf.train.Saver()
     merged = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(FLAGS.logdir, graph = tf.get_default_graph())
@@ -168,47 +148,30 @@ def train(z, label_acc_adv_theta):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
             sess.run(primal_train_op, feed_dict={x:xmb})
-            for gen in range(1):
-                sess.run(adversary_theta_train_op, feed_dict={x:xmb})
+            
             vtp_loss = sess.run([primal_loss], feed_dict={x:xmb})
             vtp_list.append(vtp_loss)
         if i%100 == 0:
-            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_,pgradA_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta,pgradA], feed_dict={x:xmb})
+            x_post_prob_log_,pgradA_ = sess.run([x_post_prob_log,pgradA], feed_dict={x:xmb})
             print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_)
             print("grad A:",pgradA_)
-        if i%500 == 0:
-            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-            run_metadata = tf.RunMetadata()
-            summary = sess.run(merged,feed_dict={x:xmb})
-            train_writer.add_run_metadata(run_metadata, 'step %i'%(i))
-            train_writer.add_summary(summary, i)
 
-        if i%500 == 0:
-            test_lik_list = []
-            for i in range(100):
-                test_lik = sess.run(x_post_prob_log_test)
-                test_lik_list.append(test_lik)
-            test_lik = np.stack(test_lik_list, axis=1)
-            test_lik = np.mean(test_lik, axis=1)
-            test_lik = np.mean(test_lik)
-            test_lik_list1.append(test_lik)
-            path = saver.save(sess,FLAGS.logdir+"/model.ckpt",i)
-            print("Model saved at ",path)
-    
+
     # Save the summary data for analysis
-    A_,DELTA_inv_,M_test = sess.run([A_old,DELTA_inv,M_test])
-    M_test = M_test[0]
-    np.save("M.npy",M_test)
+    # A_,DELTA_inv_,M_test = sess.run([A_old,DELTA_inv,M_test])
+    # M_test = M_test[0]
+    # np.save("M.npy",M_test)
+    A1 = sess.run(A1)
     np.save("vtp_loss1.npy", vtp_list)
     #np.save("x_post_list1.npy",post_test_list)
     np.save("A1.npy",np.mean(A_, axis=0))
-    np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
+    # np.save("delta_inv1.npy",np.mean(DELTA_inv_,axis=0))
 
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
     #lap = ds.Laplace(0.0,1.0)
     #z_sampled = lap.sample([batch_size,latent_dim])
-    z_sampled = tf.random_normal([batch_size, latent_dim])
+    # z_sampled = tf.random_normal([batch_size, latent_dim])
     reverse_kl = tf.placeholder_with_default(1.0,())
     pearson = tf.placeholder_with_default(0.0,())
     eps = tf.random_normal([batch_size, eps_dim])
@@ -234,7 +197,7 @@ if __name__ == "__main__":
     #logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var) + latent_dim*np.log(2*np.pi), [1])
     #logz = tf.reduce_mean(logz)
     #logr = tf.reduce_mean(logr)
-
+    A1 = tf.Variable(initial_value = np.random.normal(size=[1,inp_data_dim,latent_dim]))
     # Evaluating p(x|z)
     means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z_train.shape[0],latent_dim])*z_train,tf.transpose(A1, perm=[0,2,1]))
     prec = tf.square(DELTA_inv1)
@@ -249,29 +212,29 @@ if __name__ == "__main__":
     x_post_prob_log = tf.reduce_mean(x_post_prob_log)
 
     # Dual loss
-    Td = data_network(z_norm)
-    Ti = data_network(z_sampled, reuse=True)
-    d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Td, labels=tf.ones_like(Td)))
-    d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Ti, labels=tf.zeros_like(Ti)))
-    dual_loss = d_loss_d+d_loss_i
+    # Td = data_network(z_norm)
+    # Ti = data_network(z_sampled, reuse=True)
+    # d_loss_d = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Td, labels=tf.ones_like(Td)))
+    # d_loss_i = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=Ti, labels=tf.zeros_like(Ti)))
+    # dual_loss = d_loss_d+d_loss_i
 
     # dual loss for theta
-    dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,DELTA_inv,inp_data_dim, latent_dim, rank)
+    # dual_loss_theta, label_acc_adv_theta, q_ratio = cal_theta_adv_loss(A1,DELTA_inv,inp_data_dim, latent_dim, rank)
     
     #Adversary Accuracy
-    correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
-    label_acc_adv = correct_labels_adv/(2.0*batch_size)
+    # correct_labels_adv = tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.greater(tf.sigmoid(Td),thresh_adv), tf.int32),1),tf.float32)) + tf.reduce_sum(tf.cast(tf.equal(tf.cast(tf.less_equal(tf.sigmoid(Td),thresh_adv), tf.int32),0),tf.float32))
+    # label_acc_adv = correct_labels_adv/(2.0*batch_size)
 
     # Primal loss
-    t1 = -tf.reduce_mean(Td)
-    t2 = 500*x_post_prob_log
-    t5 = logz-logr
-    t3 = q_ratio
+    # t1 = -tf.reduce_mean(Td)
+    t2 = x_post_prob_log
+    # t5 = logz-logr
+    # t3 = q_ratio
     f_input = tf.squeeze(q_ratio)-Td
     f_input = tf.exp(f_input) 
     t4 = tf.reduce_mean(tf.square(f_input-1))
-    KL_neg_r_q = t1
-    ELBO = pearson*(t2-t4)+reverse_kl*(t2+t3)
+    # KL_neg_r_q = t1
+    ELBO = pearson*(t2-t4)+reverse_kl*(t2)
     primal_loss = tf.reduce_mean(-ELBO)
     pgradA = tf.gradients(primal_loss,A1)
 

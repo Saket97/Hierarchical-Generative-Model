@@ -16,19 +16,19 @@ st = tf.contrib.bayesflow.stochastic_tensor
 graph_replace = tf.contrib.graph_editor.graph_replace
 
 """ Hyperparameters """
-latent_dim=60
+latent_dim=10
 nepoch = 3101
 lr = 10**(-4)
-batch_size = 160
-ntrain = 160
-test_batch_size = 40
-ntest=40
-inp_data_dim = 1000
+batch_size = 500
+ntrain = 500
+test_batch_size = 10
+ntest=10
+inp_data_dim = 300
 eps_dim = 40
 eps_nbasis=32
 n_clf_epoch = 5000
 thresh_adv = 0.5
-rank = 20
+rank = 10
 
 """ tensorboard """
 parser = argparse.ArgumentParser()
@@ -40,22 +40,26 @@ tf.gfile.MakeDirs(FLAGS.logdir)
 
 def load_dataset():
     raw_data = np.load("/opt/data/saket/toy/x.npy")
+    delta_ld = np.load("/opt/data/saket/toy/delta.npy")
+    z_ld = np.load("/opt/data/saket/toy/z.npy")
+    print("raw data shape:",raw_data.shape)
     #raw_data = np.log10(raw_data+0.1)
     global inp_data_dim
     inp_data_dim = raw_data.shape[1]
     m = np.mean(raw_data, axis=0)
-    raw_data = (raw_data-m)/5.0
+    raw_data = (raw_data-m)
     #cov = (np.log10(cov+0.1))/5.0
-    return raw_data[0:ntrain],raw_data[ntrain:ntrain+ntest]
+    return raw_data[0:ntrain],raw_data[ntrain:ntrain+ntest],delta_ld, z_ld[0:ntrain],z_ld[ntrain:ntrain+ntest]
 
-X_train, X_test = load_dataset()
+X_train, X_test, delta, z_train, Z_test = load_dataset()
+delta = delta.astype(np.float32)
 print("inp_data_dim:",inp_data_dim)
 X_test = X_test.astype(np.float32)
 
 def encoder(x, eps=None, n_layer=1, n_hidden=128, reuse=False):
     with tf.variable_scope("Encoder", reuse = reuse):
-        h = slim.repeat(x, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.1))
-        out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.1))
+        h = slim.repeat(x, n_layer, slim.fully_connected, n_hidden, activation_fn=tf.nn.elu, weights_regularizer=slim.l2_regularizer(0.01))
+        out = slim.fully_connected(h, latent_dim, activation_fn=None, weights_regularizer=slim.l2_regularizer(0.01))
         #out = tf.Print(out,[out],message="Encoder:out")
         a_vec = []
         for i in range(eps_nbasis):
@@ -102,7 +106,7 @@ def train(z, label_acc_adv_theta):
     dual_optimizer_theta = tf.train.AdamOptimizer(learning_rate=1e-4, use_locking=True, beta1=0.5)
     #classifier_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
 
-    primal_grad = primal_optimizer.compute_gradients(primal_loss+r_loss, var_list=tp_var)
+    primal_grad = primal_optimizer.compute_gradients(primal_loss, var_list=tp_var)
     capped_g_grad = []
     for grad,var in primal_grad:
         if grad is not None:
@@ -117,27 +121,29 @@ def train(z, label_acc_adv_theta):
     adversary_train_op = dual_optimizer.apply_gradients(capped_g_grad)
   
     #adversary_theta_train_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
-    adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta+r_loss, var_list=tr_vars)
+    adversary_theta_grad = dual_optimizer_theta.compute_gradients(dual_loss_theta, var_list=tr_vars)
     capped_g_grad = []
     for grad,var in adversary_theta_grad:
         if grad is not None:
             capped_g_grad.append((tf.clip_by_value(grad,-0.1,0.1),var))
     adversary_theta_train_op = dual_optimizer_theta.apply_gradients(capped_g_grad)
 
-    primal_train_op = primal_optimizer.minimize(primal_loss+r_loss, var_list=tp_var)
+    primal_train_op = primal_optimizer.minimize(primal_loss, var_list=tp_var)
     adversary_train_op = dual_optimizer.minimize(dual_loss+r_loss,var_list=d_vars)
-    adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta+r_loss, var_list=tr_vars)
+    adversary_theta_tain_op = dual_optimizer_theta.minimize(dual_loss_theta, var_list=tr_vars)
     train_op = tf.group(primal_train_op, adversary_train_op)
     
     # Test Set Graph
     eps = tf.random_normal(tf.stack([eps_nbasis, test_batch_size,eps_dim]))
     z_test, _, _ = encoder(X_test,eps,reuse=True)
     U_test,V_test,D_test,M_test = generator(inp_data_dim,latent_dim,rank,n_samples=500, reuse=True)
-    A_old = tf.matmul(U_test,V_test)
-    #A_old = U_test
+    #A_old = tf.matmul(U_test,V_test)
+    A_old = U_test
     A = A_old*M_test
-    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],z_test.get_shape().as_list()[0],latent_dim])*z_test,tf.transpose(A, perm=[0,2,1]))
+    print("z_test shape:",Z_test.shape)
+    means = tf.matmul(tf.ones([A.get_shape().as_list()[0],Z_test.shape[0],latent_dim])*Z_test,tf.transpose(A, perm=[0,2,1]))
     prec = tf.square(D_test)
+    prec = tf.square(delta)
     t = (X_test-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
     t1 = -0.5*tf.reduce_sum(t1, axis=2)
@@ -161,14 +167,15 @@ def train(z, label_acc_adv_theta):
     for i in range(nepoch):
         for j in range(ntrain//batch_size):
             xmb = X_train[j*batch_size:(j+1)*batch_size]
-            sess.run(train_op, feed_dict={x:xmb})
+            sess.run(primal_train_op, feed_dict={x:xmb})
             for gen in range(1):
                 sess.run(adversary_theta_train_op, feed_dict={x:xmb})
             vtp_loss = sess.run([primal_loss], feed_dict={x:xmb})
             vtp_list.append(vtp_loss)
         if i%100 == 0:
-            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta], feed_dict={x:xmb})
+            Td_,KL_neg_r_q_,x_post_prob_log_,logz_,logr_,d_loss_d_,d_loss_i_,label_acc_adv_,label_acc_adv_theta_,dual_loss_theta_,pgradA_ = sess.run([Td,KL_neg_r_q,x_post_prob_log,logz,logr,d_loss_d,d_loss_i,label_acc_adv, label_acc_adv_theta, dual_loss_theta,pgradA], feed_dict={x:xmb})
             print("epoch:",i," vtp:",vtp_list[-1], " x_post:",x_post_prob_log_)
+            print("grad A:",pgradA_)
         if i%500 == 0:
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()
@@ -199,36 +206,39 @@ def train(z, label_acc_adv_theta):
 
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))
+    #lap = ds.Laplace(0.0,1.0)
+    #z_sampled = lap.sample([batch_size,latent_dim])
     z_sampled = tf.random_normal([batch_size, latent_dim])
     reverse_kl = tf.placeholder_with_default(1.0,())
     pearson = tf.placeholder_with_default(0.0,())
     eps = tf.random_normal([batch_size, eps_dim])
 
-    n_samples=4
-    U,V,DELTA_inv,M = generator(inp_data_dim,latent_dim,rank,n_samples=n_samples)
-    U1 = tf.slice(U,[0,0,0],[1,-1,-1])
-    V1 = tf.slice(V,[0,0,0],[1,-1,-1])
-    M1 = tf.slice(M,[0,0,0],[1,-1,-1])
-    A1 = tf.matmul(U1,V1)
+    #n_samples=4
+    #U,V,DELTA_inv,M = generator(inp_data_dim,latent_dim,rank,n_samples=n_samples)
+    #U1 = tf.slice(U,[0,0,0],[1,-1,-1])
+    #V1 = tf.slice(V,[0,0,0],[1,-1,-1])
+    #M1 = tf.slice(M,[0,0,0],[1,-1,-1])
+    ##A1 = tf.matmul(U1,V1)
     #A1 = U1
-    A1 = A1*M1
-    DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
-    # Draw samples from posterior q(z2|x)
-    print("Sampling from posterior...")
-    eps = tf.random_normal(tf.stack([eps_nbasis, batch_size, eps_dim]))
-    z, z_mean, z_var = encoder(x,eps,reuse=False)
-    z_mean, z_var = tf.stop_gradient(z_mean), tf.stop_gradient(z_var)
-    z_std = tf.sqrt(z_var + 1e-4)
-    # z_sampled = R_std*R_sampled+R_mean
-    z_norm = (z-1.0*z_mean)/z_std
-    logz = get_zlogprob(z, "gauss")
-    logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var) + latent_dim*np.log(2*np.pi), [1])
-    logz = tf.reduce_mean(logz)
-    logr = tf.reduce_mean(logr)
+    #A1 = A1*M1
+    #DELTA_inv1 = tf.slice(DELTA_inv, [0,0],[1,-1])
+    ## Draw samples from posterior q(z2|x)
+    #print("Sampling from posterior...")
+    #eps = tf.random_normal(tf.stack([eps_nbasis, batch_size, eps_dim]))
+    #z, z_mean, z_var = encoder(x,eps,reuse=False)
+    #z_mean, z_var = tf.stop_gradient(z_mean), tf.stop_gradient(z_var)
+    #z_std = tf.sqrt(z_var + 1e-4)
+    ## z_sampled = R_std*R_sampled+R_mean
+    #z_norm = (z-1.0*z_mean)/z_std
+    #logz = get_zlogprob(z, "gauss")
+    #logr = -0.5 * tf.reduce_sum(z_norm*z_norm + tf.log(z_var) + latent_dim*np.log(2*np.pi), [1])
+    #logz = tf.reduce_mean(logz)
+    #logr = tf.reduce_mean(logr)
 
     # Evaluating p(x|z)
-    means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z.get_shape().as_list()[0],latent_dim])*z,tf.transpose(A1, perm=[0,2,1]))
+    means = tf.matmul(tf.ones([A1.get_shape().as_list()[0],z_train.shape[0],latent_dim])*z_train,tf.transpose(A1, perm=[0,2,1]))
     prec = tf.square(DELTA_inv1)
+    prec = tf.square(delta)
     t = (x-means)
     t1 = t*tf.expand_dims(prec, axis=1)*t
     t1 = -0.5*tf.reduce_sum(t1, axis=2) # (n_samples, batch_size)
@@ -254,15 +264,16 @@ if __name__ == "__main__":
 
     # Primal loss
     t1 = -tf.reduce_mean(Td)
-    t2 = x_post_prob_log
+    t2 = 500*x_post_prob_log
     t5 = logz-logr
     t3 = q_ratio
     f_input = tf.squeeze(q_ratio)-Td
     f_input = tf.exp(f_input) 
     t4 = tf.reduce_mean(tf.square(f_input-1))
     KL_neg_r_q = t1
-    ELBO = pearson*(t2-t4)+reverse_kl*(t1+t2+t3+t5)
+    ELBO = pearson*(t2-t4)+reverse_kl*(t2+t3)
     primal_loss = tf.reduce_mean(-ELBO)
+    pgradA = tf.gradients(primal_loss,A1)
 
     print("V in main:",V.get_shape().as_list())
     print("U in main:",U.get_shape().as_list())

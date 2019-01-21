@@ -402,7 +402,51 @@ def train(z, closs, label_acc_adv_theta):
         z_ = sess.run(z_test)
         #print("z_:",z_)
         z_list.append(z_)
-    np.save("z_test_list.npy",z_list)
+    z_test_new = np.stack(z_list, axis=0)
+    z_test_new = np.mean(z_test_new, axis=0)
+    z_test_new = np.concatenate([np.expand_dims(Ltb_test,axis=1),np.expand_dims(Lac_test,axis=1),np.expand_dims(Lla_test,axis=1),np.expand_dims(L_test,axis=1),z_test_new],axis=1)
+    np.savetxt("factor_scores_test.csv",z_test_new, delimiter=",")
+#    np.save("z_test.npy",np.mean(np.array(z_list),axis=0))
+    
+    z_list = []
+    for k in range(20):
+        for i in range(1):
+            zmb_list = []
+            for j in range(ntrain//batch_size):
+                xmb = X_train[j*batch_size:(j+1)*batch_size]
+                cmb = C_train[j*batch_size:(j+1)*batch_size]
+                zmb = sess.run(z,feed_dict={x:xmb,c:cmb})
+
+                ltbmb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+                i2 = (ltbmb == 2).nonzero()[0]
+                ltbmb[i2] = 1
+                lacmb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+                i1 = (lacmb == 1).nonzero()[0]
+                lacmb[i1] = 0
+                i2 = (lacmb == 2).nonzero()[0]
+                lacmb[i2] = 1
+                llamb = np.copy(Ltb_train[j*batch_size:(j+1)*batch_size])
+                i2 = (llamb == 2).nonzero()[0]
+                llamb[i2] = 0
+                hivmb = L_train[j*batch_size:(j+1)*batch_size] 
+                zmb = np.concatenate([np.expand_dims(ltbmb,axis=1),np.expand_dims(lacmb,axis=1),np.expand_dims(llamb,axis=1),np.expand_dims(hivmb,axis=1),zmb],axis=1)
+                zmb_list.append(zmb)
+        z_list.append(np.concatenate(zmb_list,axis=0))
+    z_train =  np.stack(z_list,axis=0)
+    print("z_train shape temp:",z_train.shape)
+    z_train = np.mean(z_train,axis=0)
+    
+    np.savetxt("factor_scores_train.csv",z_train, delimiter=",")
+
+    hiv_pred = (np.argmax(avg_test_prob_hiv,axis=1)==L_test)
+    tb_pred = (np.argmax(avg_test_prob_tb,axis=1)==Ltb_test)
+    ac_pred = (np.argmax(avg_test_prob_ac,axis=1)==Lac_test)
+    la_pred = (np.argmax(avg_test_prob_la,axis=1)==Lla_test)
+
+    np.save("hiv_pred.npy",hiv_pred)
+    np.save("tb_pred.npy",tb_pred)
+    np.save("ac_pred.npy",ac_pred)
+    np.save("la_pred.npy",la_pred)
 
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))

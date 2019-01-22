@@ -370,6 +370,25 @@ def train(z, closs, label_acc_adv_theta):
     #    #print("z_:",z_)
     #    z_list.append(z_)
     #np.save("z_test_list.npy",z_list)
+    z_list = []
+    for i in range(20):
+        zmb_list = []
+        for j in range(ntrain//batch_size):
+            xmb = X_train[j*batch_size:(j+1)*batch_size]
+            cmb = C_train[j*batch_size:(j+1)*batch_size]
+            # sess.run(sample_from_r, feed_dict={x:xmb, c:cmb})
+            xmb,cmb,cnp_mb,db_mb,gl_mb,ibd_mb,lac_mb,quin_mb = next_minibatch()
+            zmb = sess.run(z,feed_dict={x:xmb,c:cmb})
+
+            zmb = np.concatenate([np.expand_dims(ibd_mb,axis=1),np.expand_dims(gl_mb,axis=1),zmb],axis=1)
+            zmb_list.append(zmb)
+        z_new = np.concatenate(zmb_list,axis=0)
+        z_list.append(z_new)
+    z_train_new = np.stack(z_list,axis=0)
+    z_train_new = np.mean(z_train_new, axis=0)
+    corr = np.corrcoef(z_train_new.T)
+    np.save("corr_microbiome.npy",corr)
+
 
 if __name__ == "__main__":
     x = tf.placeholder(tf.float32, shape=(batch_size, inp_data_dim))

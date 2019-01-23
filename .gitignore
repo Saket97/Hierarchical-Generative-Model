@@ -4,3 +4,5 @@ recon_loss.pkl
 recon_loss.pkl
 tr_loss.pkl
 s_loss.pkl
+*.npy
+*.png
